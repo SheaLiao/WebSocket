@@ -242,3 +242,13 @@ void send_data(evutil_socket_t fd, short events, void *arg)
 	bufferevent_write(sock_ev->bev, buf, len);
 }
 #endif
+
+
+void signal_cb(evutil_socket_t sig, short events, void *arg)
+{
+	socket_event_t	*sock_ev = (socket_event_t *)arg;
+	struct timeval	delay = {2, 0};
+
+	log_warn("Caught a signal, stop\n");
+	event_base_loopexit(sock_ev->base, &delay);
+}

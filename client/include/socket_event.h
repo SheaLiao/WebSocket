@@ -21,6 +21,7 @@ typedef struct socket_event_s
 	int					port;
 	struct event_base	*base;
 	struct bufferevent	*bev;
+	struct event		*sig;
 }socket_event_t;
 
 
@@ -32,5 +33,7 @@ extern void read_cb(struct bufferevent *bev, void *arg);
 //extern void write_cb(struct bufferevent *bev, void *arg);
 extern void reconnect_cb(evutil_socket_t fd, short events, void *arg);
 extern void send_data(evutil_socket_t fd, short events, void *arg);
+extern void signal_cb(evutil_socket_t sig, short events, void *arg);
+
 
 #endif

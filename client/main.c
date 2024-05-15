@@ -20,6 +20,7 @@
 #include <string.h>
 #include <getopt.h>
 #include <fcntl.h>
+#include <signal.h>
 #include <event2/event.h>
 #include <event2/bufferevent.h>
 #include <event2/util.h>
@@ -29,7 +30,6 @@
 #include "ds18b20.h"
 #include "logger.h"
 #include "packet.h"
-#include "proc.h"
 #include "socket_event.h"
 
 
@@ -161,6 +161,15 @@ int main (int argc, char **argv)
 
 	ev = event_new(sock_ev->base, -1, EV_PERSIST, send_data, sock_ev);
 	event_add(ev, &tv);
+
+	sock_ev->sig = evsignal_new(sock_ev->base, SIGINT, signal_cb, sock_ev);
+	if( !sock_ev->sig || event_add(sock_ev->sig, NULL) < 0 )
+	{
+		log_error("set signal failure\n");
+		socket_ev_close(sock_ev);
+		free(sock_ev);
+		return -5;
+	}
 
 	event_base_dispatch(sock_ev->base);
 

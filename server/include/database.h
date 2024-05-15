@@ -2,27 +2,24 @@
  *      Copyright:  (C) 2024 linuxer<linuxer@email.com>
  *                  All rights reserved.
  *
- *       Filename:  proc.h
+ *       Filename:  database.h
  *    Description:  This file 
  *
- *        Version:  1.0.0(01/04/24)
+ *        Version:  1.0.0(22/03/24)
  *         Author:  Liao Shengli <linuxer@email.com>
- *      ChangeLog:  1, Release initial version on "01/04/24 14:53:45"
+ *      ChangeLog:  1, Release initial version on "22/03/24 17:39:04"
  *                 
  ********************************************************************************/
 
-#ifndef _PROC_H_
-#define _PROC_H_
+#ifndef _DATABASE_H_
+#define _DATABASE_H_
 
-typedef struct proc_sig_s
-{
-	unsigned		stop;
-	int				signal;
-} proc_sig_t;
-
-extern proc_sig_t g_signal;
-
-extern void signal_handler(int sig);
-extern void install_signal(void);
+extern int open_database(const char *db_file);
+extern void close_database();
+extern int insert_database(void *pack, int size);
 
 #endif
+
+
+
+
