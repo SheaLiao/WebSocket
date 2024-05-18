@@ -26,7 +26,7 @@ install:
 	cp -rf lib${LIBNAME}.* ${INSTPATH}
 
 uninstall:
-	rm -rf `pwd`/../lin/lib${LIBNAME}.*
+	rm -rf `pwd`/../lib/lib${LIBNAME}.*
 
 clear:
 	rm -f *.o

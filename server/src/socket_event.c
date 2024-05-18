@@ -25,6 +25,7 @@
 
 #include "socket_event.h"
 #include "logger.h"
+#include "database.h"
 
 
 int socket_ev_init(socket_event_t *sock_ev, int port)
@@ -34,12 +35,12 @@ int socket_ev_init(socket_event_t *sock_ev, int port)
 		return -1;
 	}
 
-	memset(sock_ev, 0, sizeof(sock_ev));
-	sock_ev->fd = -1;
+	memset(sock_ev, 0, sizeof(socket_event_t));
 	sock_ev->port = port;
 	sock_ev->base = NULL;
 	sock_ev->listener = NULL;
 	sock_ev->sig = NULL;
+
 
 	return 0;
 }
@@ -74,7 +75,6 @@ int socket_ev_close(socket_event_t *sock_ev)
 }
 
 
-
 void listener_cb(struct evconnlistener *listener, evutil_socket_t fd, struct sockaddr *addr, int len, void *arg)
 {
 	socket_event_t			*sock_ev = (socket_event_t *)arg;
@@ -89,7 +89,7 @@ void listener_cb(struct evconnlistener *listener, evutil_socket_t fd, struct soc
 		return ;
 	}
 
-	bufferevent_setcb(bev, read_cb, NULL, event_cb, NULL);
+	bufferevent_setcb(bev, read_cb, NULL, event_callback, sock_ev);
     bufferevent_enable(bev, EV_READ | EV_WRITE);
 }
 
@@ -103,13 +103,19 @@ void read_cb(struct bufferevent *bev, void *arg)
 	{
 		buf[len] = '\0';
 		log_info("data:%s\n", buf);
-		bufferevent_write(bev, buf, len);
+	
+		if( insert_database(buf, sizeof(buf)) < 0 )
+		{
+			log_error("Failed to insert data into database\n");
+		}
 	}
 }
 
 
-void event_cb(struct bufferevent *bev, short events, void *arg)
+void event_callback(struct bufferevent *bev, short events, void *arg)
 {
+	socket_event_t		*sock_ev = (socket_event_t *)arg;
+
 	if( events & BEV_EVENT_EOF )
 	{
 		log_warn("Connection closed\n");
@@ -120,13 +126,15 @@ void event_cb(struct bufferevent *bev, short events, void *arg)
 	}
 	
 	bufferevent_free(bev);
+	bev = NULL;
+
 }
 
 
 void signal_cb(evutil_socket_t sig, short events, void *arg)
 {
 	socket_event_t	*sock_ev = (socket_event_t *)arg;
-	struct timeval	delay = {2, 0};
+	struct timeval	delay = {DELAY_TIME, 0};
 
 	log_warn("Caught a signal, stop\n");
 

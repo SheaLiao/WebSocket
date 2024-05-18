@@ -114,12 +114,19 @@ int main (int argc, char **argv)
 		daemon(1, 0);
 	}
 
+	rv = open_database("server.db");
+	if( rv < 0 )
+	{
+		log_error("open database failure\n");
+		return -2;
+	}
+
 	rv = socket_ev_init(sock_ev, port);
 	if( rv < 0 )
 	{
 		log_error("init socket failure\n");
 		free(sock_ev);
-		return -2;
+		return -3;
 	}
 	log_info("init socket successfully\n");
 
@@ -128,7 +135,7 @@ int main (int argc, char **argv)
 	{
 		log_error("event_base_new() failure\n");
 		free(sock_ev);
-		return -3;
+		return -4;
 	}
 
 	memset(&addr, 0, sizeof(addr));
@@ -142,7 +149,7 @@ int main (int argc, char **argv)
 		log_error("Can't create a listener\n");
 		socket_ev_close(sock_ev);
 		free(sock_ev);
-		return -4;
+		return -5;
 	}
 
 	sock_ev->sig = evsignal_new(sock_ev->base, SIGINT, signal_cb, sock_ev);
@@ -151,13 +158,14 @@ int main (int argc, char **argv)
 		log_error("set signal failure\n");
 		socket_ev_close(sock_ev);
 		free(sock_ev);
-		return -5;
+		return -6;
 	}
 
 	event_base_dispatch(sock_ev->base);
 	
 	socket_ev_close(sock_ev);
 	free(sock_ev);
+	close_database();
 	log_close();
 
 

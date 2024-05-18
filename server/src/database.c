@@ -32,7 +32,7 @@ int open_database(const char *db_file)
 {
     char        *errmsg = NULL;
     int         rc;
-    char        *sql;
+    char        sql[SQL_COMMAND_LEN] = {0};
 
     rc = sqlite3_open(db_file, &s_db);
     if( rc )
@@ -44,7 +44,7 @@ int open_database(const char *db_file)
     //创建表
 	sqlite3_exec(s_db, "pragma synchronous = OFF;", 0, 0, 0); //不与当前磁盘同步
 	sqlite3_exec(s_db, "pragma auto_vacuum = 1;", 0, 0, 0);
-    sql = "CREATE TABLE IF NOT EXISTS Temp ( packet blob );";
+	snprintf(sql, sizeof(sql), "CREATE TABLE IF NOT EXISTS %s ( packet blob );", TABLE_NAME);
     rc = sqlite3_exec(s_db, sql, 0, 0, &errmsg);
     if( rc != SQLITE_OK )
     {
@@ -79,7 +79,7 @@ int insert_database(void *pack, int size)
 {
 	char			*errmsg = NULL;
 	int				rc = 0;
-	char			*sql;
+    char        	sql[SQL_COMMAND_LEN] = {0};
 	sqlite3_stmt	*stat = NULL;
 
 	if( !s_db )
@@ -89,7 +89,7 @@ int insert_database(void *pack, int size)
 		goto OUT;
 	}
 
-	sql = sqlite3_mprintf("INSERT INTO Temp (packet) VALUES (?)");
+	snprintf(sql, sizeof(sql), "INSERT INTO %s (packet) VALUES (?)", TABLE_NAME);
 	rc = sqlite3_prepare_v2(s_db, sql, -1, &stat, NULL);
 	if( rc != SQLITE_OK )
 	{

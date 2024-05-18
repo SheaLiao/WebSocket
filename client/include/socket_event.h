@@ -14,9 +14,11 @@
 #ifndef _SOCKET_H_
 #define _SOCKET_H_
 
+
+#define DELAY_TIME 5
+
 typedef struct socket_event_s
 {
-	int					fd;
 	char				servip[64];
 	int					port;
 	struct event_base	*base;
@@ -30,7 +32,6 @@ extern int socket_ev_close(socket_event_t *sock_ev);
 extern int socket_ev_connect(socket_event_t *sock_ev);
 extern void event_callback(struct bufferevent *bev, short events, void *arg);
 extern void read_cb(struct bufferevent *bev, void *arg);
-//extern void write_cb(struct bufferevent *bev, void *arg);
 extern void reconnect_cb(evutil_socket_t fd, short events, void *arg);
 extern void send_data(evutil_socket_t fd, short events, void *arg);
 extern void signal_cb(evutil_socket_t sig, short events, void *arg);

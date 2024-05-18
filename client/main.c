@@ -120,7 +120,7 @@ int main (int argc, char **argv)
 		return 0;
 	}
 
-	if( log_open(logfile, loglevel, logsize, THREAD_LOCK_NONE) < 0          )
+	if( log_open(logfile, loglevel, logsize, THREAD_LOCK_NONE) < 0 )
 	{
 		fprintf(stderr, "initial log system failure\n");
 		return -1;
@@ -143,22 +143,23 @@ int main (int argc, char **argv)
 
 	log_info("[%s:%d]\n", sock_ev->servip, sock_ev->port);
 
+	sock_ev->base = event_base_new();
+	if( !sock_ev->base )
+	{
+		log_error("event_base_new() failure\n");
+		return -3;
+	}
+
 	rv = socket_ev_connect(sock_ev);
 	if( rv < 0 )
 	{
 		log_error("connect to server failure\n");
-		free(sock_ev);
+		//free(sock_ev);
 	}
 	log_info("connect successfully\n");
 
-	bufferevent_setcb(sock_ev->bev, read_cb, NULL, event_callback, sock_ev);
-	bufferevent_enable(sock_ev->bev, EV_WRITE | EV_READ);
-
 	tv.tv_sec = interval;
 	tv.tv_usec = 0;
-
-	log_info("interval:%d\n", interval);
-
 	ev = event_new(sock_ev->base, -1, EV_PERSIST, send_data, sock_ev);
 	event_add(ev, &tv);
 
@@ -166,7 +167,7 @@ int main (int argc, char **argv)
 	if( !sock_ev->sig || event_add(sock_ev->sig, NULL) < 0 )
 	{
 		log_error("set signal failure\n");
-		socket_ev_close(sock_ev);
+		//socket_ev_close(sock_ev);
 		free(sock_ev);
 		return -5;
 	}
