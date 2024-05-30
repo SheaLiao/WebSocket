@@ -3,10 +3,12 @@ INSTPATH=`pwd`/../lib/
 INCPATH=`pwd`/../include/ 
 SQLPATH=`pwd`/../openlibs/sqlite/install/include/ 
 EVPATH=`pwd`/../openlibs/libevent/install/include
+SSLPATH=`pwd`/../openlibs/openssl/install/include
 
 CFLAGS+=-I${INCPATH}
 CFLAGS+=-I${SQLPATH}
 CFLAGS+=-I${EVPATH}
+CFLAGS+=-I${SSLPATH}
 
 CC=gcc
 AR=ar 

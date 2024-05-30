@@ -25,6 +25,11 @@
 #include <event2/util.h>
 #include <event2/listener.h>
 #include <arpa/inet.h>
+#include <openssl/ssl.h>
+#include <openssl/err.h>
+#include <openssl/rand.h>
+#include <event2/bufferevent_ssl.h>
+
 
 #include "database.h"
 #include "logger.h"
@@ -130,6 +135,17 @@ int main (int argc, char **argv)
 	}
 	log_info("init socket successfully\n");
 
+	rv = evssl_init(sock_ev);
+	if( rv < 0 )
+	{
+		log_error("evssl_init() failure\n");
+		free(sock_ev);
+		return -4;
+	}
+	log_info("init ssl successfully\n");
+
+	sock_ev->ssl = SSL_new(sock_ev->ssl_ctx);
+
 	sock_ev->base = event_base_new();
 	if( !sock_ev->base )
 	{
@@ -137,6 +153,7 @@ int main (int argc, char **argv)
 		free(sock_ev);
 		return -4;
 	}
+	log_info("event_base_new() successfully\n");
 
 	memset(&addr, 0, sizeof(addr));
 	addr.sin_family = AF_INET;
@@ -151,6 +168,7 @@ int main (int argc, char **argv)
 		free(sock_ev);
 		return -5;
 	}
+	log_info("Create a listener on port[%d]\n", port);
 
 	sock_ev->sig = evsignal_new(sock_ev->base, SIGINT, signal_cb, sock_ev);
 	if( !sock_ev->sig || event_add(sock_ev->sig, NULL) < 0 )

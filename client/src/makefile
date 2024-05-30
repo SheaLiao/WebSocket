@@ -4,12 +4,14 @@ INCPATH=`pwd`/../include/
 SQLPATH=`pwd`/../openlibs/sqlite/install/include/ 
 JSONPATH=`pwd`/../openlibs/cJSON/install/include/cjson/
 EVPATH=`pwd`/../openlibs/libevent/install/include/
+SSLPATH=`pwd`/../openlibs/openssl/install/include
 
 
 CFLAGS+=-I${INCPATH}
 CFLAGS+=-I${SQLPATH}
 CFLAGS+=-I${JSONPATH}
 CFLAGS+=-I${EVPATH}
+CFLAGS+=-I${SSLPATH}
 
 CC=gcc
 AR=ar 

@@ -22,6 +22,11 @@
 #include <event2/listener.h>
 #include <event2/util.h>
 #include <event2/event.h>
+#include <openssl/ssl.h>
+#include <openssl/err.h>
+#include <openssl/rand.h>
+#include <event2/bufferevent_ssl.h>
+
 
 #include "socket_event.h"
 #include "logger.h"
@@ -40,8 +45,35 @@ int socket_ev_init(socket_event_t *sock_ev, int port)
 	sock_ev->base = NULL;
 	sock_ev->listener = NULL;
 	sock_ev->sig = NULL;
+	sock_ev->ssl_ctx = NULL;
+	sock_ev->ssl = NULL;
+
+	return 0;
+}
 
 
+int evssl_init(socket_event_t *sock_ev)
+{
+	SSL_load_error_strings();
+	SSL_library_init();
+	OpenSSL_add_all_algorithms();
+	ERR_load_crypto_strings();
+
+	sock_ev->ssl_ctx = SSL_CTX_new(TLS_server_method());
+    if( !sock_ev->ssl_ctx )
+    {
+        log_error("SSL_CTX_new() failure\n");
+		SSL_CTX_free(sock_ev->ssl_ctx);
+		return -1;
+    }
+
+	if( !SSL_CTX_use_certificate_chain_file(sock_ev->ssl_ctx, CACERT_FILE) || !SSL_CTX_use_PrivateKey_file(sock_ev->ssl_ctx, PRIVKEY_FILE, SSL_FILETYPE_PEM) )
+	{
+		log_error("Couldn't read 'pkey' or 'cert' file\n");
+		SSL_CTX_free(sock_ev->ssl_ctx);
+		return -2;
+	}
+	
 	return 0;
 }
 
@@ -71,6 +103,19 @@ int socket_ev_close(socket_event_t *sock_ev)
 		sock_ev->base = NULL;
 	}
 
+	if( sock_ev->ssl )
+	{
+		SSL_shutdown(sock_ev->ssl);
+    	SSL_free(sock_ev->ssl);
+		sock_ev->ssl = NULL;
+	}
+
+	if( sock_ev->ssl_ctx )
+	{
+		SSL_CTX_free(sock_ev->ssl_ctx);
+		sock_ev->ssl_ctx = NULL;
+	}
+
 	return 0;
 }
 
@@ -79,12 +124,14 @@ void listener_cb(struct evconnlistener *listener, evutil_socket_t fd, struct soc
 {
 	socket_event_t			*sock_ev = (socket_event_t *)arg;
 	struct bufferevent		*bev = NULL;
+	struct event_base 		*evbase;
 
-
-	bev = bufferevent_socket_new(sock_ev->base, fd, BEV_OPT_CLOSE_ON_FREE);
+	evbase = evconnlistener_get_base(listener);
+	
+	bev = bufferevent_openssl_socket_new(evbase, fd, sock_ev->ssl, BUFFEREVENT_SSL_ACCEPTING, BEV_OPT_CLOSE_ON_FREE);
 	if( !bev )
 	{
-		log_error("bufferevent_socket_new() failure:%s\n", strerror(errno));
+		log_error("bufferevent_socket_new() failure\n");
 		close(fd);
 		return ;
 	}
@@ -122,12 +169,14 @@ void event_callback(struct bufferevent *bev, short events, void *arg)
 	}
 	else if( events & BEV_EVENT_ERROR )
 	{
-		log_error("Connection error:%s\n", strerror(errno));
+		log_error("Connection error\n");
+	}
+	else if( events & BEV_EVENT_CONNECTED )
+	{
+		log_info("Connect successfully\n");
+		return ;
 	}
 	
-	bufferevent_free(bev);
-	bev = NULL;
-
 }
 
 

@@ -15,18 +15,23 @@
 #define _SOCKET_EVENT_H_
 
 
-#define DELAY_TIME 5
+#define DELAY_TIME		5
+#define CACERT_FILE 	"./ssl/cacert.pem"
+#define PRIVKEY_FILE 	"./ssl/privkey.pem"
 
 
 typedef struct socket_event_s
 {
-	char					port;
+	int						port;
 	struct event_base		*base;
 	struct evconnlistener	*listener;
     struct event 			*sig;
+	SSL_CTX 				*ssl_ctx;
+   	SSL 					*ssl;
 }socket_event_t;
 
 extern int socket_ev_init(socket_event_t *sock_ev, int port);
+extern int evssl_init(socket_event_t *sock_ev);
 extern int socket_ev_close(socket_event_t *sock_ev);
 extern void listener_cb(struct evconnlistener *listener, evutil_socket_t fd, struct sockaddr *addr, int len, void *arg);
 extern void read_cb(struct bufferevent *bev, void *arg);

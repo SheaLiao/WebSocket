@@ -25,6 +25,10 @@
 #include <event2/bufferevent.h>
 #include <event2/util.h>
 #include <arpa/inet.h>
+#include <openssl/ssl.h>
+#include <openssl/err.h>
+#include <event2/bufferevent_ssl.h>
+
 
 #include "database.h"
 #include "ds18b20.h"
@@ -140,14 +144,29 @@ int main (int argc, char **argv)
 		return -2;
 	}
 	log_info("init socket successfully\n");
-
 	log_info("[%s:%d]\n", sock_ev->servip, sock_ev->port);
+
+
+	/*Initialize ssl environment*/
+	SSL_library_init();
+	OpenSSL_add_all_algorithms();
+	ERR_load_crypto_strings();
+	SSL_load_error_strings();
+	
+	sock_ev->ssl_ctx = SSL_CTX_new(TLS_client_method());
+	if( !sock_ev->ssl_ctx )
+	{
+		log_error("SSL_CTX_new() failure\n");
+		return -3;
+	}
+
+	sock_ev->ssl = SSL_new(sock_ev->ssl_ctx);
 
 	sock_ev->base = event_base_new();
 	if( !sock_ev->base )
 	{
 		log_error("event_base_new() failure\n");
-		return -3;
+		return -4;
 	}
 
 	rv = socket_ev_connect(sock_ev);

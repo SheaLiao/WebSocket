@@ -22,8 +22,10 @@ typedef struct socket_event_s
 	char				servip[64];
 	int					port;
 	struct event_base	*base;
-	struct bufferevent	*bev;
+	struct bufferevent	*sslbev;
 	struct event		*sig;
+	SSL_CTX 			*ssl_ctx;
+   	SSL 				*ssl;
 }socket_event_t;
 
 
