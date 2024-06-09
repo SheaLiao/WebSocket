@@ -1,0 +1,3 @@
+# websocket
+
+基于libevent实现websocket服务器端，与浏览器建立连接通信
