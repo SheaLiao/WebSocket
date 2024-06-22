@@ -24,11 +24,22 @@
 #include <event2/bufferevent.h>
 #include <event2/util.h>
 #include <event2/listener.h>
+#include <cjson/cJSON.h>
+
 
 #include "logger.h"
 #include "ws.h"
+#include "temp.h"
 
 #define PORT	8888
+
+
+
+void temp_cb(evutil_socket_t fd, short events, void *arg) 
+{
+    ws_ctx_t *ws_ctx = (ws_ctx_t *)arg;
+    send_temperature(ws_ctx);
+}
 
 
 void read_cb(struct bufferevent *bev, void *arg)
@@ -82,6 +93,9 @@ int main (int argc, char **argv)
 {
 	ws_ctx_t				*ws_ctx = (ws_ctx_t *)malloc(sizeof(ws_ctx_t));
 	struct evconnlistener   *listener = NULL;
+	struct event 			*temp_event = NULL;
+    struct timeval 			tv;
+
 	struct sockaddr_in		addr;
 	int                 	len = sizeof(addr);
 
@@ -89,7 +103,7 @@ int main (int argc, char **argv)
 	int                     loglevel = LOG_LEVEL_DEBUG;
 	int                     logsize = 10;
 
-	if( log_open(logfile, loglevel, logsize, THREAD_LOCK_NONE) < 0 )
+	if( log_open("console", loglevel, logsize, THREAD_LOCK_NONE) < 0 )
 	{
 		fprintf(stderr, "initial log system failure\n");
 		return -1;
@@ -120,8 +134,14 @@ int main (int argc, char **argv)
         return -4;
     }
 
+	tv.tv_sec = 5; // 每5秒发送一次温度数据
+    tv.tv_usec = 0;
+    temp_event = event_new(ws_ctx->base, -1, EV_PERSIST, temp_cb, ws_ctx);
+    event_add(temp_event, &tv);
+
 	event_base_dispatch(ws_ctx->base);
 
+	event_free(temp_event);
 	evconnlistener_free(listener);
 	ws_ctx_close(ws_ctx);
 	free(ws_ctx);

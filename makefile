@@ -8,7 +8,7 @@ LDFLAGS+=-L${LIBPATH}
 CC=gcc
 
 all:
-	${CC} ${CFLAGS} -g websocket.c -o ${APPNAME} ${LDFLAGS} -lmywslib -lssl -lcrypto -levent
+	${CC} ${CFLAGS} -g websocket.c -o ${APPNAME} ${LDFLAGS} -lmywslib -lssl -lcrypto -levent -lcjson
 
 clean:
 	rm -f ${APPNAME}

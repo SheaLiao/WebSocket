@@ -29,7 +29,9 @@
 #include <event2/bufferevent.h>
 #include <event2/util.h>
 #include <event2/listener.h>
-\
+#include <cjson/cJSON.h>
+
+
 #include "ws.h"
 #include "logger.h"
 
@@ -164,6 +166,43 @@ void umask(char *payload, int length, char *mask_key)
 }
 
 
+void handle_led_control(const char *payload) 
+{
+    cJSON *root = cJSON_Parse(payload);
+    
+	if (!root) {
+        log_error("cJSON_Parse() error\n");
+        return;
+    }
+
+    cJSON *type = cJSON_GetObjectItem(root, "type");
+    if (type && cJSON_IsString(type) && (strcmp(type->valuestring, "toggleLED") == 0)) 
+	{
+        cJSON *ledId = cJSON_GetObjectItem(root, "ledId");
+        cJSON *status = cJSON_GetObjectItem(root, "status");
+
+        if (cJSON_IsNumber(ledId) && cJSON_IsString(status)) 
+		{
+            int ledIdValue = ledId->valueint;
+            const char *statusValue = status->valuestring;
+
+            // 显示LED控制信息
+            if (strcmp(statusValue, "on") == 0) 
+			{
+                printf("LED%d ON\n", ledIdValue);
+            } 
+			else 
+			{
+                printf("LED%d OFF\n", ledIdValue);
+            }
+        }
+    }
+
+    cJSON_Delete(root);  // 释放 cJSON 对象
+}
+
+
+
 int transmission(ws_ctx_t *ws_ctx, char *buf, int len)
 {
 	ws_ophdr_t		*hdr = NULL;
@@ -173,8 +212,9 @@ int transmission(ws_ctx_t *ws_ctx, char *buf, int len)
 	unsigned char 	*payload = NULL;
 	int				pl_len = 0;
 
-	printf("buf:%s\n", buf);
 	hdr = (ws_ophdr_t *)buf;
+	
+
 	if( hdr->pl_len < 126 )
 	{
 		pl_len = hdr->pl_len; 
@@ -213,6 +253,19 @@ int transmission(ws_ctx_t *ws_ctx, char *buf, int len)
 		
 		log_info("payload:%s\n", payload);
 	}
+
+	if (hdr->opcode == 0x1) 
+	{ // 0x1 表示文本帧
+        payload[pl_len] = '\0'; // 确保字符串结束符
+        printf("Received payload: %s\n", payload);
+
+        // 处理JSON消息
+        handle_led_control((char *)payload);
+    } 
+	else 
+	{
+        log_error("Non-text message received\n");
+    }
 
 	return 0;
 }
