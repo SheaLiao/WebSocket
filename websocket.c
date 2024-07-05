@@ -4,100 +4,107 @@
  *
  *       Filename:  websocket.c
  *    Description:  This file 
- *                 
- *        Version:  1.0.0(2024年06月03日)
+ *      reference:   https://github.com/mortzdk/websocket
+ *
+ *        Version:  1.0.0(2024年07月01日)
  *         Author:  Liao Shengli <2928382441@qq.com>
- *      ChangeLog:  1, Release initial version on "2024年06月03日 20时52分02秒"
+ *      ChangeLog:  1, Release initial version on "2024年07月01日 21时34分34秒"
  *                 
  ********************************************************************************/
 
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
-#include <sys/socket.h>
-#include <arpa/inet.h>
-#include <fcntl.h>
+#include <stdlib.h>
 #include <unistd.h>
-#include <errno.h>
-#include <time.h>
-#include <event2/event.h>
-#include <event2/bufferevent.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <stdbool.h>
 #include <event2/util.h>
+#include <event2/buffer.h>
 #include <event2/listener.h>
-#include <cjson/cJSON.h>
-
+#include <event2/bufferevent.h>
+#include <event2/bufferevent_struct.h>
 
 #include "logger.h"
 #include "ws.h"
-#include "temp.h"
+#include "frame.h"
 
-#define PORT	8888
+#define PORT  11111
 
 
-
-void temp_cb(evutil_socket_t fd, short events, void *arg) 
+static void read_cb (struct bufferevent *bev, void *ctx)
 {
-    ws_ctx_t *ws_ctx = (ws_ctx_t *)arg;
-    send_temperature(ws_ctx);
-}
+    wss_session_t              *session = bev->cbarg;
 
-
-void read_cb(struct bufferevent *bev, void *arg)
-{
-	ws_ctx_t	*ws_ctx = (ws_ctx_t *)arg;
-	char		buf[BUFFER_LENGTH] = {0};
-	int			len = 0;
-
-	len = bufferevent_read(ws_ctx->bev, buf, BUFFER_LENGTH);
-	if( len > 0 )
-	{
-		ws_request(ws_ctx->bev, buf, len, ws_ctx);
-	}
-}
-
-
-void event_cb(struct bufferevent *bev, short events, void *arg)
-{
-	if (events & BEV_EVENT_EOF) 
-	{
-        log_error("Connection closed.\n");
-    } 
-	else if (events & BEV_EVENT_ERROR) 
-	{
-        log_error("Connect failure: %s\n", strerror(errno));
-    }
-    //bufferevent_free(bev);
-}
-
-
-void accept_cb(struct evconnlistener *listener, evutil_socket_t fd, struct sockaddr *addr, int len, void *arg)
-{
-    ws_ctx_t				*ws_ctx = (ws_ctx_t *)arg;
-
-    ws_ctx->bev = bufferevent_socket_new(ws_ctx->base, fd, BEV_OPT_CLOSE_ON_FREE);
-    if( !ws_ctx->bev )
+    if( !session->handshaked )
     {
-        log_error("bufferevent_socket_new() failure:%s\n", strerror(errno));
+        do_wss_handshake(session);
+        return ;
+    }
+
+    do_parser_frames(session);
+
+    return ;
+}
+
+static void event_cb (struct bufferevent *bev, short events, void *ctx)
+{
+    wss_session_t              *session = bev->cbarg;
+
+    if( events&(BEV_EVENT_EOF|BEV_EVENT_ERROR) )
+    {
+        if( session )
+            log_warn("remote client %s closed\n", session->client);
+
+        bufferevent_free(bev);
+    }
+
+    return ;
+}
+
+
+static void accept_cb(struct evconnlistener *listener, evutil_socket_t fd, struct sockaddr *addr, int len, void *arg)
+{
+	struct event_base               *ebase = arg;
+    struct bufferevent              *bev_accpt;
+    struct sockaddr_in              *sock = (struct sockaddr_in *)addr;
+    wss_session_t                   *session;
+
+	if( !(session = malloc(sizeof(*session))) )
+    {
+        log_error("malloc for session failure:%s\n", strerror(errno));
         close(fd);
         return ;
     }
-	
 
-	ws_ctx->state = 0;
-	bufferevent_setcb(ws_ctx->bev, read_cb, NULL, event_cb, ws_ctx);
-	bufferevent_enable(ws_ctx->bev, EV_READ | EV_WRITE);
+	memset(session, 0, sizeof(*session));
+    snprintf(session->client, sizeof(session->client), "[%d->%s:%d]", fd, inet_ntoa(sock->sin_addr), ntohs(sock->sin_port));
+    log_info("accpet new socket client %s\n", session->client);
+
+	bev_accpt = bufferevent_socket_new(ebase, fd, BEV_OPT_CLOSE_ON_FREE|BEV_OPT_DEFER_CALLBACKS);
+	if( !bev_accpt )
+    {
+        log_error("create bufferevent for client for %s failed\n", session->client);
+        return;
+    }
+	session->bev = bev_accpt;
+
+	bufferevent_setcb(bev_accpt, read_cb, NULL, event_cb, session);
+	bufferevent_enable(bev_accpt, EV_READ|EV_WRITE);
+
+    return;
 }
+
 
 
 int main (int argc, char **argv)
 {
-	ws_ctx_t				*ws_ctx = (ws_ctx_t *)malloc(sizeof(ws_ctx_t));
-	struct evconnlistener   *listener = NULL;
-	struct event 			*temp_event = NULL;
-    struct timeval 			tv;
+	struct sockaddr_in      addr;
+	int						len = sizeof(addr);
 
-	struct sockaddr_in		addr;
-	int                 	len = sizeof(addr);
+	struct event_base		*base = NULL;
+	struct evconnlistener	*listener = NULL;
 
 	char                    *logfile = "websocket.log";
 	int                     loglevel = LOG_LEVEL_DEBUG;
@@ -109,42 +116,29 @@ int main (int argc, char **argv)
 		return -1;
 	}
 
-	if( ws_ctx_init(ws_ctx) < 0 )
+	base = event_base_new();
+	if( !base )
 	{
-		log_error("ws_ctx initial failure\n");
+		log_error("event_base_new() failure\n");
 		return -2;
 	}
 
-	ws_ctx->base = event_base_new();
-    if( !ws_ctx->base )
-    {
-        log_error("event_base_new() failure\n");
-        return -3;
-    }
-
 	memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(PORT);
-    addr.sin_addr.s_addr = htonl(INADDR_ANY);
+	addr.sin_family = AF_INET;
+	addr.sin_port = htons(PORT);
+	addr.sin_addr.s_addr = htonl(INADDR_ANY);
 
-	listener = evconnlistener_new_bind(ws_ctx->base, accept_cb, ws_ctx, LEV_OPT_REUSEABLE | LEV_OPT_CLOSE_ON_FREE, -1, (struct sockaddr *)&addr, sizeof(addr));
-    if( !listener )
-    {
-        log_error("Can't create a listener\n");
-        return -4;
-    }
+	listener = evconnlistener_new_bind(base, accept_cb, base, LEV_OPT_REUSEABLE | LEV_OPT_CLOSE_ON_FREE, -1, (struct sockaddr *)&addr, sizeof(addr));
+	if( !listener )
+	{
+		log_error("Can't create a listener\n");
+		event_base_free(base);
+		return -3;
+	}
 
-	tv.tv_sec = 5; // 每5秒发送一次温度数据
-    tv.tv_usec = 0;
-    temp_event = event_new(ws_ctx->base, -1, EV_PERSIST, temp_cb, ws_ctx);
-    event_add(temp_event, &tv);
-
-	event_base_dispatch(ws_ctx->base);
-
-	event_free(temp_event);
+	event_base_dispatch(base);
 	evconnlistener_free(listener);
-	ws_ctx_close(ws_ctx);
-	free(ws_ctx);
+	event_base_free(base);
 
 	return 0;
 } 

@@ -5,287 +5,549 @@
  *       Filename:  ws.c
  *    Description:  This file 
  *                 
- *        Version:  1.0.0(2024年06月03日)
+ *        Version:  1.0.0(2024年07月01日)
  *         Author:  Liao Shengli <2928382441@qq.com>
- *      ChangeLog:  1, Release initial version on "2024年06月03日 12时21分32秒"
+ *      ChangeLog:  1, Release initial version on "2024年07月01日 19时40分52秒"
  *                 
  ********************************************************************************/
 
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
-#include <inttypes.h>
-#include <sys/socket.h>
-#include <arpa/inet.h>
-#include <fcntl.h>
 #include <unistd.h>
-#include <errno.h>
-#include <time.h>
-#include <openssl/sha.h>
-#include <openssl/pem.h>
-#include <openssl/bio.h>
-#include <openssl/evp.h>
-#include <event2/event.h>
-#include <event2/bufferevent.h>
-#include <event2/util.h>
-#include <event2/listener.h>
-#include <cjson/cJSON.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <stdlib.h>
+#include <ctype.h>
 
+#include <event2/util.h>
+#include <event2/buffer.h>
+#include <event2/listener.h>
+#include <event2/bufferevent.h>
 
 #include "ws.h"
 #include "logger.h"
+#include "b64.h"
+#include "sha1.h"
+#include "index_html.h"
 
-#define ntohll(x)   ((((uint64_t)ntohl(x&0xFFFFFFFF)) << 32) + ntohl(x >> 32))
+static inline char *trim(char* str);
+static inline void header_set_version(wss_header_t *header, char *v);
+static size_t base64_encode_sha1(char *key, size_t key_length, char **accept_key);
 
-int ws_ctx_init(ws_ctx_t *ws_ctx)
+/**
+ * Performs a websocket handshake with the client session
+ *
+ * @param   session     [wss_session_t *]   "The client session"
+ * @return              [void]
+ */
+void do_wss_handshake(wss_session_t *session)
 {
-	if( !ws_ctx )
-	{
-		return -1;
-	}
+    int                         bytes;
+    char                        buf[2048] = {0};
+    enum HttpStatus_Code        code;
+    struct evbuffer            *src;
+    struct bufferevent         *bev = session->bev;
+    wss_header_t               *header = &session->header;
 
-	memset(ws_ctx, 0, sizeof(ws_ctx));
-	ws_ctx->base = NULL;
-	ws_ctx->listener = NULL;
-	ws_ctx->bev = NULL;
-	ws_ctx->state = 0;
+    log_info("Doing websocket handshake\n");
 
-	return 0;
+    src = bufferevent_get_input(bev);
+    bytes = evbuffer_get_length(src);
+
+    bytes = evbuffer_remove(src, buf, sizeof(buf));
+    header->content = buf;
+    header->length = bytes;
+
+    log_debug("Parser [%d] bytes data from client %s:\n%s\n", bytes, session->client, buf);
+
+    code = wss_parser_header(header);
+    log_info("Client header parsed HTTP status code: [%d]\n", code);
+
+    if( REQ_HTTP == header->type )
+    {
+        http_response(bev, code);
+        return ;
+    }
+
+    // Create Upgrade HTTP header based on clients header
+    code = wss_upgrade_header(header);
+    switch (code) {
+        case HttpStatus_UpgradeRequired:
+            log_error("Rejecting HTTP request as the service requires use of the Websocket protocol.\n");
+            upgrade_response(bev, code, "This service requires use of the Websocket protocol.");
+            break;
+
+        case HttpStatus_NotImplemented:
+            log_error("Rejecting HTTP request as Websocket protocol is not yet implemented.\n");
+            http_response(bev, code);
+            break;
+
+        case HttpStatus_SwitchingProtocols:
+            handshake_response(bev, header, code);
+            break;
+
+        default:
+            log_error("Rejecting HTTP request as server was unable to parse http header as websocket request.\n");
+            http_response(bev, code);
+            break;
+    }
+
+    session->handshaked = 1;
+    return ;
 }
 
-
-void ws_ctx_close(ws_ctx_t *ws_ctx)
+enum HttpStatus_Code wss_parser_header(wss_header_t *header)
 {
-	if( !ws_ctx )
-	{
-		return ;
-	}
+    char                  *token = NULL;
+    char                  *lineptr, *temp, *line, *sep;
+    char                  *tokenptr = NULL, *sepptr = NULL;
 
-	if( ws_ctx->bev )
-	{
-		bufferevent_free(ws_ctx->bev);
-		ws_ctx->bev = NULL;
-	}
+    log_info("Starting parsing header received from client.\n");
 
-	if( ws_ctx->base )
-	{
-		event_base_free(ws_ctx->base);
-		ws_ctx->base = NULL;
-	}
+    /* Checking request is websocket or http */
+    if( strstr(header->content, "WebSocket") )
+        header->type = REQ_WS;
+    else
+        header->type = REQ_HTTP;
 
-}
+    /* Process the first line of the request message by \r\n  */
+    token = strtok_r(header->content, "\r", &tokenptr);
+    if (!token || tokenptr[0] != '\n'){
+        log_error("Found invalid first line of header\n");
+        header->type = REQ_FRAME; /* Maybe frame package  */
+        return HttpStatus_BadRequest;
+    }
+    tokenptr++;
 
-int base64_encode(char *in_str, int in_len, char *out_str) 
-{
-    BIO 	*b64, *bio;
-    BUF_MEM *bptr = NULL;
-    size_t 	size = 0;
+    /* Receiving and checking method of the request */
+    if ( !(header->method=strtok_r(token, " ", &lineptr)) ) {
+        log_error("Unable to parse header method\n");
+        return HttpStatus_BadRequest;
+    } else if( strncmp(header->method, "GET", 3) ) {
+        log_error("Method that the client is using is unknown.\n");
+        return HttpStatus_BadRequest;
+    }
 
-    if (in_str == NULL || out_str == NULL)
-        return -1;
+    /* Receiving and checking path of the request */
+    if ( !(header->path=strtok_r(NULL, " ", &lineptr)) ) {
+        log_error("Unable to parse header path\n");
+        return HttpStatus_BadRequest;
+    } else if ( strncmp("/", header->path, 1) != 0 &&
+            strncasecmp("ws://", header->path, 5) != 0 &&
+            strncasecmp("http://", header->path, 7) != 0 ) {
+        log_error("The request URI is not absolute URI nor relative path\n");
+        return HttpStatus_NotFound;
+    }
 
-    b64 = BIO_new(BIO_f_base64());
-    bio = BIO_new(BIO_s_mem());
-    bio = BIO_push(b64, bio);
+    if( strstr(header->path, "favicon.ico") )
+    {
+        log_error("favicon service not being available\n");
+        return HttpStatus_NotImplemented;
+    }
 
-    BIO_write(bio, in_str, in_len);
-    BIO_flush(bio);
+    /* Receiving and checking version of the request */
+    if ( !(header->version = strtok_r(NULL, " ", &lineptr)) ) {
+        log_error("Unable to parse header version\n");
+        return HttpStatus_BadRequest;
+    } else if( strncmp(header->version, "HTTP/1.1", 8) ) {
+        log_error("HTTP version that the client is using is unknown\n");
+        return HttpStatus_BadRequest;
+    }
 
-    BIO_get_mem_ptr(bio, &bptr);
-    memcpy(out_str, bptr->data, bptr->length);
-    out_str[bptr->length-1] = '\0';
-    size = bptr->length;
+    /* We've reached the payload */
+    if ( strlen(token) >= 2 && tokenptr[0] == '\r' && tokenptr[1] == '\n' ) {
+        tokenptr += 2;
 
-    BIO_free_all(bio);
-    return size;
-}
+        if ( strlen(tokenptr) > SIZE_PAYLOAD ) {
+            log_error("Payload size received is too large\n");
+            return HttpStatus_BadRequest;
+        }
 
+        header->payload = tokenptr;
+        token = NULL;
+    } else {
+        token = strtok_r(NULL, "\r", &tokenptr);
 
-int readline(char *allbuf, int idx, char *linebuf) 
-{
-    int len = strlen(allbuf);
-
-    for(; idx < len; idx++) 
-	{
-        if (allbuf[idx] == '\r' && allbuf[idx+1] == '\n') 
-		{
-            return idx+2;
-        } 
-		else 
-		{
-            *(linebuf++) = allbuf[idx];
+        if ( tokenptr[0] == '\n' ) {
+            tokenptr++;
+        } else if ( tokenptr[0] != '\0' ) {
+            log_error("Line shall always end with newline character\n");
+            return HttpStatus_BadRequest;
         }
     }
 
-    return -1;
-}
+    while ( token ) {
+        log_trace("token: %s\n", token);
 
+        line = strtok_r(token, ":", &lineptr);
 
-int handshark(struct bufferevent *bev, char *buf, int len)
-{
-	char	linebuf[1024] = {0};
-	int		idx = 0;
-	char	sec_data[20] = {0};
-	char	sec_accept[128] = {0};
+        if( strlen(token)> SIZE_HEADER ) {
+            log_error("Header size received is too large.");
+            return HttpStatus_BadRequest;
+        };
 
-	do{
-		memset(linebuf, 0, 1024);
-		idx = readline(buf, idx, linebuf);
+        /* start parser the header lines */
+        if ( line ) {
+            if( !strcasecmp(line,"Host") ) {
+                header->host= (strtok_r(NULL, "", &lineptr)+1);
+                log_debug("Host: %s\n", header->host);
 
-		if(strstr(linebuf, "Sec-WebSocket-Key"))
-		{
-			strcat(linebuf, GUID);
-			
-			SHA1(linebuf + WEBSOCK_KEY_LENGTH, strlen(linebuf + WEBSOCK_KEY_LENGTH), sec_data);
-			base64_encode(sec_data, strlen(sec_data), sec_accept);
+            } else if( !strcasecmp(line,"Connection") ) {
+                header->ws_connection = (strtok_r(NULL, "", &lineptr)+1);
+                log_debug("Connection: %s\n", header->ws_connection);
 
-			memset(buf, 0, BUFFER_LENGTH);
-			len = sprintf(buf, "HTTP/1.1 101 Switching Protocols\r\n"
-                            	"Upgrade: websocket\r\n"
-                        	    "Connection: Upgrade\r\n"
-                                "Sec-WebSocket-Accept: %s\r\n\r\n", sec_accept);
-			
-			printf("Response: %s\n", buf);
+            } else if( !strcasecmp(line,"Upgrade") ) {
+                header->ws_upgrade = (strtok_r(NULL, "", &lineptr)+1);
+                log_debug("Upgrade: %s\n", header->ws_upgrade);
 
-			bufferevent_write(bev, buf, len);
-			break;
-		}
-	} while ((buf[idx] != '\r' || buf[idx+1] != '\n') && idx != -1);
+            } else if( !strcasecmp(line,"Origin") ) {
+                header->ws_origin = (strtok_r(NULL, "", &lineptr)+1);
+                log_debug("Origin: %s\n", header->ws_origin);
 
-	return 0;
-}
+            } else if( !strcasecmp(line,"Sec-WebSocket-Version") ) {
+                sep = trim(strtok_r(strtok_r(NULL, "", &lineptr), ",", &sepptr));
+                while (NULL != sep) {
+                    header_set_version(header, sep);
+                    sep = trim(strtok_r(NULL, ",", &sepptr));
+                }
+                log_debug("Sec-WebSocket-Version: %d\n", header->ws_version);
 
+            } else if( !strcasecmp(line,"Sec-WebSocket-Key") ) {
+                header->ws_key = (strtok_r(NULL, "", &lineptr)+1);
+                log_debug("Sec-WebSocket-Key: %s\n", header->ws_key);
 
-void umask(char *payload, int length, char *mask_key) 
-{
-    int i = 0;
-    
-	for (i = 0; i < length; i++) {
-        payload[i] ^= mask_key[i % 4];
-    }
-}
+            } else if( !strcasecmp(line,"Sec-WebSocket-Key1") ) {
+                header->ws_key1 = (strtok_r(NULL, "", &lineptr)+1);
+                header->ws_type = HIXIE76;
+                log_debug("Sec-WebSocket-Key1: %s\n", header->ws_key1);
 
+            } else if( !strcasecmp(line,"Sec-WebSocket-Key2") ) {
+                header->ws_key2 = (strtok_r(NULL, "", &lineptr)+1);
+                header->ws_type = HIXIE76;
+                log_debug("Sec-WebSocket-Key2: %s\n", header->ws_key2);
+            }
 
-void handle_led_control(const char *payload) 
-{
-    cJSON *root = cJSON_Parse(payload);
-    
-	if (!root) {
-        log_error("cJSON_Parse() error\n");
-        return;
-    }
+            /* RFU for other parser */
+        };
 
-    cJSON *type = cJSON_GetObjectItem(root, "type");
-    if (type && cJSON_IsString(type) && (strcmp(type->valuestring, "toggleLED") == 0)) 
-	{
-        cJSON *ledId = cJSON_GetObjectItem(root, "ledId");
-        cJSON *status = cJSON_GetObjectItem(root, "status");
+        // We've reached the payload
+        if ( strlen(tokenptr)>=2 && tokenptr[0]=='\r' && tokenptr[1]=='\n' ) {
+            tokenptr += 2;
 
-        if (cJSON_IsNumber(ledId) && cJSON_IsString(status)) 
-		{
-            int ledIdValue = ledId->valueint;
-            const char *statusValue = status->valuestring;
+            if ( strlen(tokenptr) > SIZE_PAYLOAD ) {
+                log_error("Payload size received is too large\n");
+                return HttpStatus_BadRequest;
+            }
 
-            // 显示LED控制信息
-            if (strcmp(statusValue, "on") == 0) 
-			{
-                printf("LED%d ON\n", ledIdValue);
-            } 
-			else 
-			{
-                printf("LED%d OFF\n", ledIdValue);
+            header->payload = tokenptr;
+            temp = NULL;
+        } else {
+            temp = strtok_r(NULL, "\r", &tokenptr);
+
+            if ( tokenptr[0]=='\n' ) {
+                tokenptr++;
+            } else if ( tokenptr[0] != '\0' ) {
+                log_error("Line shall always end with newline character\n");
+                return HttpStatus_BadRequest;
             }
         }
+
+        if ( temp==NULL && header->ws_type==HIXIE76 ) {
+            header->ws_type = HIXIE76;
+            header->ws_key3 = header->payload;
+        }
+
+        token = temp;
     }
 
-    cJSON_Delete(root);  // 释放 cJSON 对象
+    if ( header->ws_type == UNKNOWN
+            && header->ws_version == 0
+            && header->ws_key1 == NULL
+            && header->ws_key2 == NULL
+            && header->ws_key3 == NULL
+            && header->ws_key == NULL
+            && header->ws_upgrade != NULL
+            && strcasecmp(header->ws_upgrade, "websocket") == 0
+            && header->ws_connection != NULL
+            && strcasecmp(header->ws_connection, "Upgrade") == 0
+            && header->host != NULL
+            && header->ws_origin != NULL ) {
+        header->ws_type = HIXIE75;
+    }
+
+    return HttpStatus_OK;
 }
 
-
-
-int transmission(ws_ctx_t *ws_ctx, char *buf, int len)
+enum HttpStatus_Code wss_upgrade_header(wss_header_t *header)
 {
-	ws_ophdr_t		*hdr = NULL;
-	ws_head_126_t	*hdr126 = NULL;
-	ws_head_127_t	*hdr127 = NULL;
+    unsigned char *key = NULL;
+    unsigned long key_length;
 
-	unsigned char 	*payload = NULL;
-	int				pl_len = 0;
+    log_info("start upgrade websocket header\n");
 
-	hdr = (ws_ophdr_t *)buf;
-	
-
-	if( hdr->pl_len < 126 )
-	{
-		pl_len = hdr->pl_len; 
-		payload = (unsigned char *)(buf + sizeof(ws_ophdr_t) + 4);
-		
-		if (hdr->mask)  //mask=1,need to decode
-		{
-            umask((char *)payload, pl_len, buf + sizeof(ws_ophdr_t));
-        }
-		
-		log_info("payload:%s\n", payload);
-	}
-	else if ( hdr->pl_len == 126 )
-	{
-		hdr126 = (ws_head_126_t *)(buf + sizeof(ws_ophdr_t));
-		pl_len = ntohs(hdr126->pl_len);
-		payload =(unsigned char *) (buf + sizeof(ws_ophdr_t) + sizeof(ws_head_126_t) + 4);
-		
-		if (hdr->mask)  //mask=1,need to decode
-		{
-            umask(payload, pl_len, buf + sizeof(ws_ophdr_t) + sizeof(ws_head_126_t));
-        }
-		
-		log_info("payload:%s\n", payload);
-	}
-	else
-	{
-		hdr127 = (ws_head_127_t *)(buf + sizeof(ws_ophdr_t));
-		pl_len = ntohll(hdr127->pl_len);
-		payload =(unsigned char *) (buf + sizeof(ws_ophdr_t) + sizeof(ws_head_127_t) + 4);
-
-		if (hdr->mask)  //mask=1,need to decode
-		{
-            umask(payload, hdr->pl_len, buf + sizeof(ws_ophdr_t) + sizeof(ws_head_127_t));
-        }
-		
-		log_info("payload:%s\n", payload);
-	}
-
-	if (hdr->opcode == 0x1) 
-	{ // 0x1 表示文本帧
-        payload[pl_len] = '\0'; // 确保字符串结束符
-        printf("Received payload: %s\n", payload);
-
-        // 处理JSON消息
-        handle_led_control((char *)payload);
-    } 
-	else 
-	{
-        log_error("Non-text message received\n");
+    log_debug("Validating upgrade header\n");
+    if ( !header->ws_upgrade || strcasecmp(header->ws_upgrade, "websocket") || (header->ws_type<=HIXIE76 && strcasecmp(header->ws_upgrade, "WebSocket")) )
+    {
+        log_error("Invalid upgrade header value\n");
+        return HttpStatus_UpgradeRequired;
     }
 
-	return 0;
+    log_debug("Validating connection header\n");
+    if ( !header->ws_connection || !strstr(header->ws_connection, "Upgrade") ) {
+        log_error("Invalid upgrade header value\n");
+        return HttpStatus_UpgradeRequired;
+    }
+
+    log_debug("Validating websocket version\n");
+    switch (header->ws_type) {
+        case RFC6455:
+        case HYBI10:
+        case HYBI07:
+            break;
+        default:
+        log_error("Invalid websocket version\n");
+        return HttpStatus_NotImplemented;
+    }
+
+    log_debug("Validating websocket key\n");
+
+    if ( !header->ws_key ) {
+        log_error("Invalid websocket key\n");
+        return HttpStatus_UpgradeRequired;
+    }
+
+    key = b64_decode_ex(header->ws_key, strlen(header->ws_key), &key_length);
+    if ( !key || key_length != SEC_WEBSOCKET_KEY_LENGTH ) {
+        log_error("Invalid websocket key\n");
+        free(key);
+        return HttpStatus_UpgradeRequired;
+    }
+
+    free(key);
+
+    log_info("Accepted handshake, switching protocol\n");
+    return HttpStatus_SwitchingProtocols;
 }
 
-void ws_request(struct bufferevent *bev, char *buf, int len, void *arg) 
+void http_response(struct bufferevent *bev, enum HttpStatus_Code code)
 {
-    ws_ctx_t *ws_ctx = (ws_ctx_t *)arg;
+    char                   buf[4096] = {0x00};
+    char                  *message = buf;
+    const char            *reason  = HttpStatus_reasonPhrase(code);
+    int                    oft = 0;
+    int                    bodylen = 0;
 
-    printf("state: %d\n", ws_ctx->state);
-    if (ws_ctx->state == WS_HANDSHARK) 
-	{
-        ws_ctx->state = WS_TRANMISSION;
-        handshark(bev, buf, len);
-    } 
-	else if (ws_ctx->state == WS_TRANMISSION) 
-	{
-        transmission(ws_ctx, buf, len);
+    /* HTTP version header */
+    oft = sprintf(message+oft, HTTP_STATUS_LINE, code, reason);
+
+    if( code != HttpStatus_OK )
+    {
+        log_info("Serving HTTP error code[%d] page to the client\n", code);
+
+        /* HTTP body length */
+        bodylen += strlen(HTTP_BODY) - 6; /* minus: %d %s %s  */
+        bodylen += 3; /* HttpStatus_Code should be 3 bytes: 200, 404  */
+        bodylen += 2*strlen(reason);
+
+        /* HTTP HTML header */
+        oft += sprintf(message+oft, HTTP_HTML_HEADERS, bodylen, WSS_SERVER_VERSION);
+
+        /* HTTP body */
+        sprintf(message+oft, HTTP_BODY, code, reason, reason);
+
+        /* send response */
+        write(bufferevent_getfd(bev), buf, strlen(buf));
+    }
+    else
+    {
+        log_info("Serving default HTTP index page to the client\n");
+
+        /* HTTP body length */
+        bodylen += strlen(g_index_html);
+
+        /* HTTP HTML header */
+        oft += sprintf(message+oft, HTTP_HTML_HEADERS, bodylen, WSS_SERVER_VERSION);
+
+        /* send response HTML header */
+        write(bufferevent_getfd(bev), buf, strlen(buf));
+
+        /* send response Web page */
+        write(bufferevent_getfd(bev), g_index_html, strlen(g_index_html));
     }
 
-    log_info("websocket request: %d\n", ws_ctx->state);
+    bufferevent_free(bev);
+
+    return ;
+}
+
+void upgrade_response(struct bufferevent *bev, enum HttpStatus_Code code, char *exp)
+{
+    char                   buf[4096] = {0x00};
+    char                  *message = buf;
+    const char            *reason  = HttpStatus_reasonPhrase(code);
+    int                    oft = 0;
+    int                    bodylen = 0;
+
+    log_info("Serving HTTP error code[%d] page to the client\n", code);
+
+    /* HTTP version header */
+    oft = sprintf(message+oft, HTTP_STATUS_LINE, code, reason);
+
+    /* HTTP body is the explain message */
+    bodylen += strlen(exp);
+
+    /* HTTP HTML header */
+    oft += sprintf(message+oft, HTTP_UPGRADE_HEADERS, bodylen, WSS_SERVER_VERSION);
+
+    /* HTTP body is the explain message */
+    sprintf(message+oft, "%s", exp);
+
+    /* send response */
+    write(bufferevent_getfd(bev), buf, strlen(buf));
+
+    bufferevent_free(bev);
+
+    return ;
 }
 
 
+/**
+ * Function that generates a handshake response, used to authorize a websocket
+ * session.
+ *
+ * @param   header  [wss_header_t*]         "The http header obtained from the session"
+ * @param   code    [enum HttpStatus_Code]  "The http status code to return"
+ * @return          [wss_message_t *]       "A message structure that can be passed through ringbuffer"
+ */
+void handshake_response(struct bufferevent *bev, wss_header_t *header, enum HttpStatus_Code code)
+{
+    char                   buf[4096] = {0x00};
+    char                  *message = buf;
+    const char            *reason = HttpStatus_reasonPhrase(code);
+    size_t                 oft = 0;
+    char                   key[128];
+    char                  *acceptKey;
+    size_t                 acceptKeyLength;
+
+    /* Generate accept key */
+    memset(key, 0, sizeof(key));
+    snprintf(key, sizeof(key), "%s%s", header->ws_key, MAGIC_WEBSOCKET_KEY);
+
+    acceptKeyLength = base64_encode_sha1(key, strlen(key), &acceptKey);
+    if (acceptKeyLength == 0) {
+        free(acceptKey);
+        return ;
+    }
+
+    /* HTTP version header */
+    oft += sprintf(message+oft, HTTP_STATUS_LINE, code, reason);
+
+    /* Websocket handshake accept */
+    oft += sprintf(message+oft, HTTP_HANDSHAKE_ACCEPT);
+    memcpy(message+oft, acceptKey, acceptKeyLength);
+    free(acceptKey);
+    oft += acceptKeyLength;
+    sprintf(message+oft, "\r\n");
+    oft += 2;
+
+    /* Websocket handshake header */
+    oft += sprintf(message+oft, HTTP_HANDSHAKE_HEADERS, WSS_SERVER_VERSION);
+
+    log_debug("Handshake Response: \n%s\n", message);
+
+    /* send response */
+    write(bufferevent_getfd(bev), buf, strlen(buf));
+
+    return ;
+}
+
+
+/**
+ * Function creates a sha1 hash of the key and base64 encodes it.
+ *
+ * @param   key         [char *]                "The key to be hashed"
+ * @param   key_length  [size_t]                "The length of the key"
+ * @param   accept_key  [char **]               "A pointer to where the hash should be stored"
+ * @return              [size_t]                "Length of accept_key"
+ */
+static size_t base64_encode_sha1(char *key, size_t key_length, char **accept_key)
+{
+    int                    i, b;
+    size_t                 acceptKeyLength;
+    char                   sha1Key[SHA_DIGEST_LENGTH];
+
+    memset(sha1Key, '\0', SHA_DIGEST_LENGTH);
+    SHA1Context sha;
+
+    SHA1Reset(&sha);
+    SHA1Input(&sha, (const unsigned char*) key, key_length);
+    if ( SHA1Result(&sha) ) {
+        for (i = 0; i<5; i++) {
+            b = htonl(sha.Message_Digest[i]);
+            memcpy(sha1Key+(4*i), (unsigned char *) &b, 4);
+        }
+    } else {
+        return 0;
+    }
+
+    *accept_key = b64_encode((const unsigned char *) sha1Key, SHA_DIGEST_LENGTH);
+    acceptKeyLength = strlen(*accept_key);
+
+    return acceptKeyLength;
+}
+
+/**
+ * Trims a string for leading and trailing whitespace.
+ *
+ * @param   str     [char *]    "The string to trim"
+ * @return          [char *]    "The input string without leading and trailing spaces"
+ */
+static inline char *trim(char* str)
+{
+    if ( !str ) {
+        return NULL;
+    }
+
+    if ( str[0] == '\0' ) {
+        return str;
+    }
+    int start, end = strlen(str);
+    for (start = 0; isspace(str[start]); ++start) {}
+    if (str[start]) {
+        while (end > 0 && isspace(str[end-1]))
+            --end;
+        memmove(str, &str[start], end - start);
+    }
+    str[end - start] = '\0';
+
+    return str;
+}
+
+static inline void header_set_version(wss_header_t *header, char *v)
+{
+
+    int version = strtol(strtok_r(NULL, "", &v), (char **) NULL, 10);
+
+    if ( header->ws_version < version ) {
+        if ( version == 4 ) {
+            header->ws_type = HYBI04;
+            header->ws_version = version;
+        } else if( version == 5 ) {
+            header->ws_type = HYBI05;
+            header->ws_version = version;
+        } else if( version == 6 ) {
+            header->ws_type = HYBI06;
+            header->ws_version = version;
+        } else if( version == 7 ) {
+            header->ws_type = HYBI07;
+            header->ws_version = version;
+        } else if( version == 8 ) {
+            header->ws_type = HYBI10;
+            header->ws_version = version;
+        } else if( version == 13 ) {
+            header->ws_type = RFC6455;
+            header->ws_version = version;
+        }
+    }
+}
