@@ -1,14 +1,14 @@
 /*********************************************************************************
- *      Copyright:  (C) 2024 Liao Shengli<2928382441@qq.com>
+ *      Copyright:  (C) 2022 GuoWenxue <guowenxue@gmail.com>
  *                  All rights reserved.
  *
- *       Filename:  ws.c
- *    Description:  This file 
- *                 
- *        Version:  1.0.0(2024年07月01日)
- *         Author:  Liao Shengli <2928382441@qq.com>
- *      ChangeLog:  1, Release initial version on "2024年07月01日 19时40分52秒"
- *                 
+ *       Filename:  wss.h
+ *    Description:  This file is a websocket Protocol API.
+ *
+ *        Version:  1.0.0(10/09/22)
+ *         Author:  Guo Wenxue <guowenxue@gmail.com>
+ *      ChangeLog:  1, Release initial version on "10/09/22 15:11:36"
+ *
  ********************************************************************************/
 
 #include <stdio.h>
@@ -25,7 +25,7 @@
 #include <event2/listener.h>
 #include <event2/bufferevent.h>
 
-#include "ws.h"
+#include "wss.h"
 #include "logger.h"
 #include "b64.h"
 #include "sha1.h"
@@ -47,29 +47,35 @@ void do_wss_handshake(wss_session_t *session)
     char                        buf[2048] = {0};
     enum HttpStatus_Code        code;
     struct evbuffer            *src;
-    struct bufferevent         *bev = session->bev;
+    struct bufferevent         *bev = session->recv_bev;
     wss_header_t               *header = &session->header;
 
     log_info("Doing websocket handshake\n");
 
-    src = bufferevent_get_input(bev);
-    bytes = evbuffer_get_length(src);
+    src = bufferevent_get_input(bev);//获取bufferevent 的输入缓冲区 src 
+    bytes = evbuffer_get_length(src);//获取缓冲区中的数据长度
 
+	//从输入缓冲区中移除数据到 buf 中，并返回实际读取的字节数 bytes
     bytes = evbuffer_remove(src, buf, sizeof(buf));
     header->content = buf;
     header->length = bytes;
 
     log_debug("Parser [%d] bytes data from client %s:\n%s\n", bytes, session->client, buf);
 
+	//解析客户端发送的请求头
     code = wss_parser_header(header);
     log_info("Client header parsed HTTP status code: [%d]\n", code);
 
+	//不是 WebSocket 协议，直接调用 http_response(bev, code) 返回 HTTP 响应并结束处理
     if( REQ_HTTP == header->type )
     {
         http_response(bev, code);
         return ;
     }
+    
+    //下面就是websocket协议 
 
+	//验证和处理 WebSocket 协议升级的请求
     // Create Upgrade HTTP header based on clients header
     code = wss_upgrade_header(header);
     switch (code) {
@@ -78,12 +84,12 @@ void do_wss_handshake(wss_session_t *session)
             upgrade_response(bev, code, "This service requires use of the Websocket protocol.");
             break;
 
-        case HttpStatus_NotImplemented:
+        case HttpStatus_NotImplemented: //WebSocket 协议尚未实现 
             log_error("Rejecting HTTP request as Websocket protocol is not yet implemented.\n");
             http_response(bev, code);
             break;
 
-        case HttpStatus_SwitchingProtocols:
+        case HttpStatus_SwitchingProtocols:  //WebSocket 握手成功,发送响应 
             handshake_response(bev, header, code);
             break;
 
@@ -111,15 +117,24 @@ enum HttpStatus_Code wss_parser_header(wss_header_t *header)
     else
         header->type = REQ_HTTP;
 
+	/**
+	 *将 header->content 按 "\r" 分割，得到第一行
+	 *strtok_r 函数用于从之前的拆分结果中获取下一个子字符串
+	 */
     /* Process the first line of the request message by \r\n  */
-    token = strtok_r(header->content, "\r", &tokenptr);
-    if (!token || tokenptr[0] != '\n'){
+    token = strtok_r(header->content, "\r", &tokenptr); 
+    /*
+	 *检查 token 是否为 NULL，表示未能成功分割第一行。
+     *检查 tokenptr[0] 是否为 '\n'，如果不是，说明第一行格式不正确。
+	 */
+	if (!token || tokenptr[0] != '\n'){
         log_error("Found invalid first line of header\n");
         header->type = REQ_FRAME; /* Maybe frame package  */
         return HttpStatus_BadRequest;
     }
-    tokenptr++;
+    tokenptr++;// 跳过 '\n'
 
+	/*提取请求方法*/
     /* Receiving and checking method of the request */
     if ( !(header->method=strtok_r(token, " ", &lineptr)) ) {
         log_error("Unable to parse header method\n");
@@ -140,12 +155,17 @@ enum HttpStatus_Code wss_parser_header(wss_header_t *header)
         return HttpStatus_NotFound;
     }
 
+	/**
+	 *检查客户端是否请求了 favicon.ico,用于忽略浏览器自动请求的 favicon.ico 文件，以避免不必要的处理
+	 *favicon.ico 是一种特殊的图标文件，它通常用于表示网站或网页的图标。浏览器在用户访问网站时会自动请求该文件
+	 */ 
     if( strstr(header->path, "favicon.ico") )
     {
         log_error("favicon service not being available\n");
         return HttpStatus_NotImplemented;
     }
 
+	//获取 HTTP 版本信息
     /* Receiving and checking version of the request */
     if ( !(header->version = strtok_r(NULL, " ", &lineptr)) ) {
         log_error("Unable to parse header version\n");
@@ -155,18 +175,23 @@ enum HttpStatus_Code wss_parser_header(wss_header_t *header)
         return HttpStatus_BadRequest;
     }
 
+	//处理和检查请求头中的负载部分
     /* We've reached the payload */
     if ( strlen(token) >= 2 && tokenptr[0] == '\r' && tokenptr[1] == '\n' ) {
-        tokenptr += 2;
+        tokenptr += 2;//到达负载部分，跳过 \r\n
 
         if ( strlen(tokenptr) > SIZE_PAYLOAD ) {
             log_error("Payload size received is too large\n");
             return HttpStatus_BadRequest;
         }
 
-        header->payload = tokenptr;
+		/**
+		 *将 tokenptr 指向的负载数据存储到 header 结构体的 payload 字段中
+		 *将token置为空，不再执行后续代码 
+		 */
+        header->payload = tokenptr; 
         token = NULL;
-    } else {
+    } else {//未到达负载部分，继续解析下一个 \r 分隔的子字符串
         token = strtok_r(NULL, "\r", &tokenptr);
 
         if ( tokenptr[0] == '\n' ) {
@@ -177,6 +202,7 @@ enum HttpStatus_Code wss_parser_header(wss_header_t *header)
         }
     }
 
+	//没到达负载，处理请求头的各个字段，直到解析到负载，跳出循环 
     while ( token ) {
         log_trace("token: %s\n", token);
 
@@ -241,7 +267,7 @@ enum HttpStatus_Code wss_parser_header(wss_header_t *header)
             }
 
             header->payload = tokenptr;
-            temp = NULL;
+            temp = NULL;  
         } else {
             temp = strtok_r(NULL, "\r", &tokenptr);
 
@@ -258,7 +284,7 @@ enum HttpStatus_Code wss_parser_header(wss_header_t *header)
             header->ws_key3 = header->payload;
         }
 
-        token = temp;
+        token = temp; //解析到负载，temp为NULL，跳出循环 
     }
 
     if ( header->ws_type == UNKNOWN
@@ -279,9 +305,11 @@ enum HttpStatus_Code wss_parser_header(wss_header_t *header)
     return HttpStatus_OK;
 }
 
+
+//确保只有符合标准的 WebSocket 升级请求才会被接受
 enum HttpStatus_Code wss_upgrade_header(wss_header_t *header)
 {
-    unsigned char *key = NULL;
+    unsigned char *key = NULL; //存储解码后的 WebSocket 密钥 
     unsigned long key_length;
 
     log_info("start upgrade websocket header\n");
@@ -317,6 +345,7 @@ enum HttpStatus_Code wss_upgrade_header(wss_header_t *header)
         return HttpStatus_UpgradeRequired;
     }
 
+	//使用 b64_decode_ex 函数对 ws_key 进行解码，并检查解码后的密钥长度是否为16
     key = b64_decode_ex(header->ws_key, strlen(header->ws_key), &key_length);
     if ( !key || key_length != SEC_WEBSOCKET_KEY_LENGTH ) {
         log_error("Invalid websocket key\n");
@@ -327,7 +356,7 @@ enum HttpStatus_Code wss_upgrade_header(wss_header_t *header)
     free(key);
 
     log_info("Accepted handshake, switching protocol\n");
-    return HttpStatus_SwitchingProtocols;
+    return HttpStatus_SwitchingProtocols;//如果所有检查都通过，返回 101 Switching Protocols
 }
 
 void http_response(struct bufferevent *bev, enum HttpStatus_Code code)
@@ -381,6 +410,8 @@ void http_response(struct bufferevent *bev, enum HttpStatus_Code code)
     return ;
 }
 
+
+//向客户端发送 HTTP 错误代码和解释信息
 void upgrade_response(struct bufferevent *bev, enum HttpStatus_Code code, char *exp)
 {
     char                   buf[4096] = {0x00};
@@ -395,13 +426,14 @@ void upgrade_response(struct bufferevent *bev, enum HttpStatus_Code code, char *
     oft = sprintf(message+oft, HTTP_STATUS_LINE, code, reason);
 
     /* HTTP body is the explain message */
-    bodylen += strlen(exp);
+    bodylen += strlen(exp);//计算响应长度 
 
     /* HTTP HTML header */
+    //构建响应头 
     oft += sprintf(message+oft, HTTP_UPGRADE_HEADERS, bodylen, WSS_SERVER_VERSION);
 
     /* HTTP body is the explain message */
-    sprintf(message+oft, "%s", exp);
+    sprintf(message+oft, "%s", exp);// 构建响应体
 
     /* send response */
     write(bufferevent_getfd(bev), buf, strlen(buf));
@@ -412,6 +444,10 @@ void upgrade_response(struct bufferevent *bev, enum HttpStatus_Code code, char *
 }
 
 
+/**
+ *处理并发送 WebSocket 握手的响应,确认服务器已接受 WebSocket 升级请求
+ */
+ 
 /**
  * Function that generates a handshake response, used to authorize a websocket
  * session.
@@ -434,16 +470,21 @@ void handshake_response(struct bufferevent *bev, wss_header_t *header, enum Http
     memset(key, 0, sizeof(key));
     snprintf(key, sizeof(key), "%s%s", header->ws_key, MAGIC_WEBSOCKET_KEY);
 
+	//生成acceptkey 
     acceptKeyLength = base64_encode_sha1(key, strlen(key), &acceptKey);
     if (acceptKeyLength == 0) {
         free(acceptKey);
         return ;
     }
 
-    /* HTTP version header */
+    /* HTTP version header 
+	 *生成状态行，包括 HTTP 版本和状态码
+	 */
     oft += sprintf(message+oft, HTTP_STATUS_LINE, code, reason);
 
-    /* Websocket handshake accept */
+    /* Websocket handshake accept 
+	 *生成 WebSocket 握手接受行，并将 acceptKey 添加到消息中
+	 */
     oft += sprintf(message+oft, HTTP_HANDSHAKE_ACCEPT);
     memcpy(message+oft, acceptKey, acceptKeyLength);
     free(acceptKey);
@@ -451,13 +492,15 @@ void handshake_response(struct bufferevent *bev, wss_header_t *header, enum Http
     sprintf(message+oft, "\r\n");
     oft += 2;
 
-    /* Websocket handshake header */
+    /* Websocket handshake header 
+	 * 生成 WebSocket 握手头部信息，包含服务器版本
+	 */
     oft += sprintf(message+oft, HTTP_HANDSHAKE_HEADERS, WSS_SERVER_VERSION);
 
     log_debug("Handshake Response: \n%s\n", message);
 
     /* send response */
-    write(bufferevent_getfd(bev), buf, strlen(buf));
+    write(bufferevent_getfd(bev), buf, strlen(buf));//从 bufferevent 中获取文件描述符,使用 write 函数将缓冲区中的数据写入到该文件描述符，实际发送到客户端
 
     return ;
 }
@@ -497,6 +540,8 @@ static size_t base64_encode_sha1(char *key, size_t key_length, char **accept_key
     return acceptKeyLength;
 }
 
+
+//去除字符串两端空白字符
 /**
  * Trims a string for leading and trailing whitespace.
  *
@@ -517,6 +562,7 @@ static inline char *trim(char* str)
     if (str[start]) {
         while (end > 0 && isspace(str[end-1]))
             --end;
+        //在内存中移动一块数据，并且处理了数据重叠的情况，所以会更安全 
         memmove(str, &str[start], end - start);
     }
     str[end - start] = '\0';

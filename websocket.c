@@ -27,10 +27,35 @@
 #include <event2/bufferevent_struct.h>
 
 #include "logger.h"
-#include "ws.h"
+#include "wss.h"
 #include "frame.h"
+#include "temp.h"
 
 #define PORT  11111
+
+
+
+static void temp_cb(evutil_socket_t fd, short events, void *arg)
+{
+	 struct bufferevent		*bev = (struct bufferevent *)arg;
+
+	 if (!bev) {
+        log_error("Received NULL buffer event in temp_cb\n");
+        return;
+    }
+	 //wss_session_t *session = (wss_session_t *)arg;
+
+	//if (!session)
+    //{
+    //    log_error("session pointer is NULL in temp_cb\n");
+    //    return;
+    //}
+
+    //log_info("Sending temperature for client: %s\n", session->client);
+
+    send_temperature(bev);
+}
+
 
 
 static void read_cb (struct bufferevent *bev, void *ctx)
@@ -57,7 +82,7 @@ static void event_cb (struct bufferevent *bev, short events, void *ctx)
         if( session )
             log_warn("remote client %s closed\n", session->client);
 
-        bufferevent_free(bev);
+   //     bufferevent_free(bev);
     }
 
     return ;
@@ -67,7 +92,10 @@ static void event_cb (struct bufferevent *bev, short events, void *ctx)
 static void accept_cb(struct evconnlistener *listener, evutil_socket_t fd, struct sockaddr *addr, int len, void *arg)
 {
 	struct event_base               *ebase = arg;
-    struct bufferevent              *bev_accpt;
+    //struct bufferevent              *bev_accpt;
+	struct bufferevent 				*recv_bev, *send_bev;
+	struct event            		*temp_event = NULL;
+	struct timeval          		tv;
     struct sockaddr_in              *sock = (struct sockaddr_in *)addr;
     wss_session_t                   *session;
 
@@ -82,6 +110,7 @@ static void accept_cb(struct evconnlistener *listener, evutil_socket_t fd, struc
     snprintf(session->client, sizeof(session->client), "[%d->%s:%d]", fd, inet_ntoa(sock->sin_addr), ntohs(sock->sin_port));
     log_info("accpet new socket client %s\n", session->client);
 
+#if 0
 	bev_accpt = bufferevent_socket_new(ebase, fd, BEV_OPT_CLOSE_ON_FREE|BEV_OPT_DEFER_CALLBACKS);
 	if( !bev_accpt )
     {
@@ -92,6 +121,39 @@ static void accept_cb(struct evconnlistener *listener, evutil_socket_t fd, struc
 
 	bufferevent_setcb(bev_accpt, read_cb, NULL, event_cb, session);
 	bufferevent_enable(bev_accpt, EV_READ|EV_WRITE);
+
+#endif
+
+	recv_bev = bufferevent_socket_new(ebase, fd, BEV_OPT_CLOSE_ON_FREE | BEV_OPT_DEFER_CALLBACKS);
+    if (!recv_bev) {
+        log_error("create bufferevent for client %s failed\n", session->client);
+        return;
+    }
+
+    send_bev = bufferevent_socket_new(ebase, fd, BEV_OPT_CLOSE_ON_FREE | BEV_OPT_DEFER_CALLBACKS);
+    if (!send_bev) {
+        log_error("create send bufferevent for client %s failed\n", session->client);
+        bufferevent_free(recv_bev);
+        return;
+    }
+
+    session->recv_bev = recv_bev;
+    session->send_bev = send_bev;
+
+    bufferevent_setcb(recv_bev, read_cb, NULL, event_cb, session);
+    bufferevent_enable(recv_bev, EV_READ | EV_WRITE);
+
+#if 1
+	tv.tv_sec = 5;	
+	tv.tv_usec = 0;
+	temp_event = event_new(ebase, -1, EV_PERSIST, temp_cb, send_bev);
+	if (!temp_event)
+    {
+        log_error("failed to create temp event\n");
+        return;
+    }
+	event_add(temp_event, &tv);
+#endif
 
     return;
 }
@@ -135,6 +197,8 @@ int main (int argc, char **argv)
 		event_base_free(base);
 		return -3;
 	}
+
+
 
 	event_base_dispatch(base);
 	evconnlistener_free(listener);

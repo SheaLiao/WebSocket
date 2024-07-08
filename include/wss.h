@@ -1,21 +1,21 @@
-/********************************************************************************
- *      Copyright:  (C) 2024 Liao Shengli<2928382441@qq.com>
+/*********************************************************************************
+ *      Copyright:  (C) 2022 GuoWenxue <guowenxue@gmail.com>
  *                  All rights reserved.
  *
- *       Filename:  ws.h
- *    Description:  This file 
+ *       Filename:  wss.h
+ *    Description:  This file is a websocket Protocol API.
  *
- *        Version:  1.0.0(2024年06月28日)
- *         Author:  Liao Shengli <2928382441@qq.com>
- *      ChangeLog:  1, Release initial version on "2024年06月28日 19时34分11秒"
- *                 
+ *        Version:  1.0.0(10/09/22)
+ *         Author:  Guo Wenxue <guowenxue@gmail.com>
+ *      ChangeLog:  1, Release initial version on "10/09/22 15:11:36"
+ *
  ********************************************************************************/
 
-#ifndef  _WS_H_
-#define  _WS_H_
-
+#ifndef  _WSS_H_
+#define  _WSS_H_
 
 #define WSS_SERVER_VERSION "v1.0.0"
+
 
 #define SHA_DIGEST_LENGTH           20
 #define MAGIC_WEBSOCKET_KEY         "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
@@ -56,30 +56,26 @@
 
 #define SEC_WEBSOCKET_KEY_LENGTH    16
 
-
-#define SIZE_PAYLOAD   		4096
-#define SIZE_HEADER    		1024
-#define HOSTN_LEN   		64
-
 typedef enum {
-	UNKNOWN  = 0,
-	HIXIE75  = 1,
-	HIXIE76  = 2,
-	HYBI04   = 4,
-	HYBI05   = 5,
-	HYBI06   = 6,
-	HYBI07   = 7,
-	HYBI10   = 8,
-	RFC6455  = 13
+    UNKNOWN  = 0,
+    HIXIE75  = 1,
+    HIXIE76  = 2,
+    HYBI04   = 4,
+    HYBI05   = 5,
+    HYBI06   = 6,
+    HYBI07   = 7,
+    HYBI10   = 8,
+    RFC6455  = 13
 } wss_type_t;
 
 typedef enum {
-	REQ_HTTP = 0, /* request for http */
-	REQ_WS   = 1, /* request for websocket */
-	REQ_FRAME= 2, /* websocket frame */
+    REQ_HTTP = 0, /* request for http */
+    REQ_WS   = 1, /* request for websocket */
+    REQ_FRAME= 2, /* websocket frame */
 } head_type_t;
 
-
+#define SIZE_PAYLOAD   4096
+#define SIZE_HEADER    1024
 typedef struct {
     char *content;            // 存储请求或响应的内容
     unsigned int length;      // 内容的长度
@@ -95,19 +91,23 @@ typedef struct {
     char *ws_connection;      // WebSocket 连接头部字段
     char *ws_origin;          // WebSocket 原点头部字段
     char *ws_key;             // WebSocket 密钥，用于握手验证
-
-	/*Hixie-76 协议特有的密钥字段，用于早期的 WebSocket 握手协议*/
-	char *ws_key1;            // Hixie-76 协议的第一个密钥
+    
+    /*Hixie-76 协议特有的密钥字段，用于早期的 WebSocket 握手协议*/ 
+    char *ws_key1;            // Hixie-76 协议的第一个密钥
     char *ws_key2;            // Hixie-76 协议的第二个密钥
     char *ws_key3;            // Hixie-76 协议的第三个密钥（8 字节）
 } wss_header_t;
 
+#define HOSTN_LEN   64
 typedef struct wss_session_s
 {
-	char                 client[HOSTN_LEN];
-	struct bufferevent   *bev;
-	wss_header_t         header;
-	unsigned char        handshaked;
+    char                 client[HOSTN_LEN];
+    struct event_base	*base;
+	struct bufferevent *recv_bev;  // 接收bufferevent
+    struct bufferevent *send_bev;  // 发送bufferevent
+	//struct bufferevent  *bev;
+    wss_header_t         header;
+    unsigned char        handshaked;
 } wss_session_t;
 
 
@@ -183,7 +183,6 @@ static inline const char* HttpStatus_reasonPhrase(int code)
     }
 }
 
-
 extern enum HttpStatus_Code wss_parser_header(wss_header_t *header);
 extern enum HttpStatus_Code wss_upgrade_header(wss_header_t *header);
 extern void http_response(struct bufferevent *bev, enum HttpStatus_Code code);
@@ -191,4 +190,4 @@ extern void upgrade_response(struct bufferevent *bev, enum HttpStatus_Code code,
 extern void handshake_response(struct bufferevent *bev, wss_header_t *header, enum HttpStatus_Code code);
 extern void do_wss_handshake(wss_session_t *session);
 
-#endif
+#endif   /* ----- #ifndef _WSS_H_  ----- */

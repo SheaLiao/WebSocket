@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Temperature Chart and Light Control</title>
+
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.1/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-iYQeCzEYFbKjA/T2uDLTpkwGzCiq6soy8tYaI1GyVh/UjpbCx/TYkiZhlZB6+fzT" crossorigin="anonymous">
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.1/dist/js/bootstrap.bundle.min.js" integrity="sha384-u1OknCvxWvY5kfmNBILK2hRnQC3Pr17a+RTT6rIHI7NnikvbZlHgTPOOmMi466C8" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/moment@2.29.1/min/moment.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-moment@^1.0.0"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin: 0;
+            padding: 20px;
+            background-color: #f0f0f0;
+        }
+
+        h1, h2 {
+            margin-bottom: 20px;
+        }
+
+        canvas {
+            max-width: 35%;
+            max-height: 55%;
+            margin-bottom: 10px;
+            border: 2px solid #000;
+            padding: 10px;
+        }
+
+        #ledContainer {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+        }
+
+        .ledButton {
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            border: none;
+            font-size: 16px;
+            color: white;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+
+        .ledButton.off {
+            background-color: gray;
+        }
+
+        .ledButton.on-red {
+            background-color: red;
+        }
+
+        .ledButton.on-green {
+            background-color: green;
+        }
+
+        .ledButton.on-blue {
+            background-color: blue;
+        }
+
+        .message {
+            display: none;
+            margin-top: 20px;
+            padding: 10px;
+            background-color: #333;
+            color: #fff;
+            border-radius: 5px;
+            font-size: 18px;
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 1000;
+        }
+    </style>
+</head>
+<body>
+    <h1>Temperature</h1>
+    <canvas id="temperatureChart"></canvas>
+    <h2>LED Control</h2>
+    <div id="ledContainer">
+        <button id="led1" class="ledButton off" onclick="toggleLight('led1')">OFF</button>
+        <button id="led2" class="ledButton off" onclick="toggleLight('led2')">OFF</button>
+        <button id="led3" class="ledButton off" onclick="toggleLight('led3')">OFF</button>
+    </div>
+    <div id="message" class="message">提示信息</div>
+
+    <script type="text/javascript">
+        document.addEventListener("DOMContentLoaded", function() {
+            const ctx = document.getElementById('temperatureChart').getContext('2d');
+            const temperatureData = {
+                labels: [],
+                datasets: [{
+                    label: 'Temperature',
+                    data: [],
+                    borderColor: 'rgba(75, 192, 192, 1)',
+                    borderWidth: 1,
+                    fill: false
+                }]
+            };
+            const config = {
+                type: 'line',
+                data: temperatureData,
+                options: {
+                    scales: {
+                        x: {
+                            type: 'time',
+                            time: {
+                                unit: 'minute'
+                            }
+                        },
+                        y: {
+                            beginAtZero: true
+                        }
+                    }
+                }
+            };
+            const temperatureChart = new Chart(ctx, config);
+
+            const ledColors = {
+                'led1': 'red',
+                'led2': 'green',
+                'led3': 'blue'
+            };
+
+            const socket = new WebSocket('ws://localhost:11111/');
+            socket.onopen = function() {
+                console.log('WebSocket connection established');
+            };
+            socket.onerror = function(error) {
+                console.error('WebSocket connection error:', error);
+            };
+
+            socket.onmessage = function(event) {
+                const message = JSON.parse(event.data);
+
+                if (message.type === 'temperature') {
+                    const time = new Date(message.timestamp);
+                    temperatureData.labels.push(time);
+                    temperatureData.datasets[0].data.push(message.value);
+
+                    if (temperatureData.labels.length > 50) {
+                        temperatureData.labels.shift();
+                        temperatureData.datasets[0].data.shift();
+                    }
+
+                    temperatureChart.update();
+                } else if (message.type === 'ledStatus') {
+                    const led = document.getElementById(`led${message.ledId}`);
+                    const color = ledColors[`led${message.ledId}`];
+                    if (message.status === 'on') {
+                        led.classList.remove('off');
+                        led.classList.add(`on-${color}`);
+                        led.textContent = 'ON';
+                    } else {
+                        led.classList.remove(`on-${color}`);
+                        led.classList.add('off');
+                        led.textContent = 'OFF';
+                    }
+                }
+            };
+
+            window.toggleLight = function(ledId) {
+                const led = document.getElementById(ledId);
+                const color = ledColors[ledId];
+                const messageElement = document.getElementById('message');
+                let action;
+                let status;
+
+                if (led.classList.contains('off')) {
+                    led.classList.remove('off');
+                    led.classList.add(`on-${color}`);
+                    led.textContent = 'ON';
+                    action = '打开';
+                    status = 'on';
+                } else {
+                    led.classList.remove(`on-${color}`);
+                    led.classList.add('off');
+                    led.textContent = 'OFF';
+                    action = '关闭';
+                    status = 'off';
+                }
+
+                // 显示提示信息
+                messageElement.textContent = `${action} LED${ledId.charAt(ledId.length - 1)}`;
+                messageElement.style.display = 'block';
+
+                // 3秒后隐藏提示信息
+                setTimeout(function() {
+                    messageElement.style.display = 'none';
+                }, 3000);
+
+                // 发送LED状态到服务器
+                socket.send(JSON.stringify({
+                    type: 'toggleLED',
+                    ledId: ledId.charAt(ledId.length - 1),
+                    status: status
+                }));
+            };
+        });
+    </script>
+</body>
+</html>
+

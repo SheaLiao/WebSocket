@@ -1,20 +1,10 @@
-/********************************************************************************
- *      Copyright:  (C) 2024 Liao Shengli<2928382441@qq.com>
- *                  All rights reserved.
- *
- *       Filename:  frame.h
- *    Description:  This file 
- *
- *        Version:  1.0.0(2024年06月28日)
- *         Author:  Liao Shengli <2928382441@qq.com>
- *      ChangeLog:  1, Release initial version on "2024年06月28日 16时35分32秒"
- *                 
- ********************************************************************************/
+#ifndef wss_frame_h
+#define wss_frame_h
 
-#ifndef _FRAME_H_
-#define _FRAME_H_
-
-#include "ws.h"
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include "wss.h"
 
 #define FRAME_SIZE       3072
 #define FRAMES_MAX       10
@@ -26,8 +16,7 @@
 #define MAX(x, y) (((x) > (y)) ? (x) : (y))
 #endif
 
-typedef enum 
-{
+typedef enum {
     CLOSE_NORMAL                 = 1000, /* The connection */
     CLOSE_SHUTDOWN               = 1001, /* Server is shutting down */
     CLOSE_PROTOCOL               = 1002, /* Some error in the protocol has happened */
@@ -45,9 +34,29 @@ typedef enum
     CLOSE_FAILED_TLS_HANDSHAKE   = 1015  /* Unexpected TLS handshake failed */
 } wss_close_t;
 
+/**
+ *    0                   1                   2                   3
+ *    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+ *   +-+-+-+-+-------+-+-------------+-------------------------------+
+ *   |F|R|R|R| opcode|M| Payload len |    Extended payload length    |
+ *   |I|S|S|S|  (4)  |A|     (7)     |             (16/64)           |
+ *   |N|V|V|V|       |S|             |   (if payload len==126/127)   |
+ *   | |1|2|3|       |K|             |                               |
+ *   +-+-+-+-+-------+-+-------------+ - - - - - - - - - - - - - - - +
+ *   |     Extended payload length continued, if payload len == 127  |
+ *   + - - - - - - - - - - - - - - - +-------------------------------+
+ *   |                               |Masking-key, if MASK set to 1  |
+ *   +-------------------------------+-------------------------------+
+ *   | Masking-key (continued)       |          Payload Data         |
+ *   +-------------------------------- - - - - - - - - - - - - - - - +
+ *   :                     Payload Data continued ...                :
+ *   + - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - +
+ *   |                     Payload Data continued ...                |
+ *   +---------------------------------------------------------------+
+ */
 
-typedef enum 
-{
+
+typedef enum {
     CONTINUATION_FRAME = 0x0,
     TEXT_FRAME         = 0x1,
     BINARY_FRAME       = 0x2,
@@ -56,42 +65,79 @@ typedef enum
     PONG_FRAME         = 0xA,
 } wss_opcode_t;
 
+typedef struct {
+    unsigned short         opcode:4;
+    unsigned short           rsv3:1;
+    unsigned short           rsv2:1;
+    unsigned short           rsv1:1;
+    unsigned short            fin:1;
 
-typedef struct wss_frame_head_s
-{
-	unsigned char	opcode:4;
-	unsigned char	rsv3:1;
-	unsigned char	rsv2:1;
-	unsigned char	rsv1:1;
-	unsigned char	fin:1;
-	unsigned char	payloadlength:7;
-	unsigned char	mask:1;
+    unsigned short    payload_len:7;
+    unsigned short           mask:1;
 } wss_frame_head_t;
 
-
-typedef struct wss_frame_s
-{
-	bool fin;
+typedef struct {
+    bool fin;
     bool rsv1;
     bool rsv2;
     bool rsv3;
     uint8_t opcode;
     bool mask;
-    uint64_t payloadlength;
-    char maskingkey[4];
+    uint64_t payloadLength;
+    char maskingKey[4];
     char *payload;
-    uint64_t extensionDataLength;
-    uint64_t applicationDataLength;
+    uint64_t extDataLength;
+    uint64_t appDataLength;
 } wss_frame_t;
 
 
-extern wss_frame_t *wss_parse_frame(char *payload, size_t length, size_t *offset);
 extern void do_parser_frames(wss_session_t *session);
-extern wss_close_t wss_validate_frame(wss_frame_t *frame, wss_close_t *reason);
-extern int wss_create_frame(int opcode, char *payload, size_t payloadlength, char *buf, size_t size);
-extern char *wss_closing_string(wss_close_t reason);
-extern void wss_free_frame(wss_frame_t *frame);
 
+/**
+ * Parses a payload of data into a websocket frame. Returns the frame and
+ * corrects the offset pointer in order for multiple frames to be processed
+ * from the same payload.
+ *
+ * @param   payload         [char *]           "The payload to be processed"
+ * @param   payload_length  [size_t]           "The length of the payload"
+ * @param   offset          [size_t *]         "A pointer to an offset"
+ * @return                  [wss_frame_t *]    "A websocket frame"
+ */
+wss_frame_t *wss_parse_frame(char *payload, size_t payload_length, uint64_t *offset);
+
+
+/**
+ * check the validation of the websocket frame.
+ *
+ * @param   frame       [wss_frame_t *]    "A websocket frame"
+ * @param   reason      [wss_close_t *]    "Invalid reason"
+ * @return              [int   ]           0: Invalid   1: Valid"
+ */
+wss_close_t wss_validate_frame(wss_frame_t *frame, wss_close_t *reason);
+
+/**
+ * Releases memory used by a frame.
+ *
+ * @param   ping     [wss_frame_t *]    "The frame that should be freed"
+ * @return           [void]
+ */
+void wss_free_frame(wss_frame_t *frame);
+
+
+/**
+ * Creates an websocket frame.
+ *
+ * @param   opcode      [int   ]           frame opcode
+ * @param   payload     [char *]           frame payload message
+ * @param   payload_len [char *]           frame payload message length
+ * @param   buf         [char *]           frame output buffer
+ * @param   size        [int   ]           frame output buffer size
+ * @return              [int   ]           frame output bytes"
+ */
+int wss_create_frame(int opcode, char *payload, size_t payload_len, char *buf, size_t size);
+
+
+char *wss_closing_string(wss_close_t reason);
 
 /* Create a websocket text frame message. */
 #define FRAME_MSG_ACK            "ACK"
@@ -101,6 +147,5 @@ extern void wss_free_frame(wss_frame_t *frame);
 /* Create a websocket close frame message. */
 #define wss_create_close_frame(buf, size, reason) \
         wss_create_frame(CLOSE_FRAME, wss_closing_string(reason), strlen(wss_closing_string(reason)), buf, size)
-
 
 #endif

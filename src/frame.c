@@ -1,203 +1,24 @@
-/*********************************************************************************
- *      Copyright:  (C) 2024 Liao Shengli<2928382441@qq.com>
- *                  All rights reserved.
- *
- *       Filename:  frame.c
- *    Description:  This file 
- *                 
- *        Version:  1.0.0(2024年06月28日)
- *         Author:  Liao Shengli <2928382441@qq.com>
- *      ChangeLog:  1, Release initial version on "2024年06月28日 17时06分07秒"
- *                 
- ********************************************************************************/
-
 #include <time.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
-#include <stdbool.h>
 #include <sys/types.h>
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <math.h>
-#include <event2/event.h>
-#include <event2/buffer.h>
-#include <event2/bufferevent.h>
-#include <event2/util.h>
 
 #include "frame.h"
 #include "logger.h"
+#include "predict.h"
 
+#include <event2/buffer.h>
+#include <event2/bufferevent.h>
+#include <event2/bufferevent_struct.h>
 
-
-/**
- * Converts the unsigned 64 bit integer from host byte order to network byte
- * order.
- *
- * @param   value  [uint64_t]   "A 64 bit unsigned integer"
- * @return         [uint64_t]   "The 64 bit unsigned integer in network byte order"
- */
-static inline uint64_t htonl64(uint64_t value)
-{
-    static const int num = 42;
-
-    /**
-     * If this check is true, the system is using the little endian
-     * convention. Else the system is using the big endian convention, which
-     * means that we do not have to represent our integers in another way.
-     */
-    if (*(char *)&num == 42) 
-	{
-        const uint32_t high = (uint32_t)(value >> 32);
-        const uint32_t low = (uint32_t)(value & 0xFFFFFFFF);
-
-        return (((uint64_t)(htonl(low))) << 32) | htonl(high);
-    } 
-	else 
-	{
-        return value;
-    }
-}
-
-/**
- * Converts the unsigned 16 bit integer from host byte order to network byte
- * order.
- *
- * @param   value  [uint16_t]   "A 16 bit unsigned integer"
- * @return         [uint16_t]   "The 16 bit unsigned integer in network byte order"
- */
-static inline uint16_t htons16(uint16_t value)
-{
-    static const int num = 42;
-
-    /**
-     * If this check is true, the system is using the little endian
-     * convention. Else the system is using the big endian convention, which
-     * means that we do not have to represent our integers in another way.
-     */
-    if (*(char *)&num == 42) 
-	{
-        return ntohs(value);
-    } 
-	else 
-	{
-        return value;
-    }
-}
-
-static void unmask(wss_frame_t *frame)
-{
-    char *applicationData = frame->payload+frame->extensionDataLength;
-    uint64_t i = 0;
-    uint64_t j;
-
-    for (j = 0; i < frame->applicationDataLength; i++, j++)
-	{
-        applicationData[j] = applicationData[i] ^ frame->maskingkey[j % 4];
-    }
-}
-
-
-
-/**
- * Parses a payload of data into a websocket frame. Returns the frame and
- * corrects the offset pointer in order for multiple frames to be processed
- * from the same payload.
- *
- * @param   payload [char *]           "The payload to be processed"
- * @param   length  [size_t]           "The length of the payload"
- * @param   offset  [size_t *]         "A pointer to an offset"
- * @return          [wss_frame_t *]    "A websocket frame"
- */
-wss_frame_t *wss_parse_frame(char *payload, size_t length, size_t *offset)
-{
-	wss_frame_t	*frame;
-
-	if ( !payload ) {
-        log_error("Payload cannot be NULL\n");
-        return NULL;
-    }
-
-    if ( !(frame = malloc(sizeof(wss_frame_t))) ) {
-        log_error("Unable to allocate frame\n");
-        return NULL;
-    }
-
-    memset(frame, 0, sizeof(*frame));
-
-	frame->mask = false;
-	frame->payloadlength = 0;
-	frame->applicationDataLength = 0;
-	frame->extensionDataLength = 0;
-
-	frame->fin    = 0x80 & payload[*offset];
-    frame->rsv1   = 0x40 & payload[*offset];
-    frame->rsv2   = 0x20 & payload[*offset];
-    frame->rsv3   = 0x10 & payload[*offset];
-    frame->opcode = 0x0F & payload[*offset];	
-
-	*offset += 1;
-
-	if( *offset < length )
-	{
-		frame->mask = 0x80 & payload[*offset];
-		frame->payloadlength = 0x7F & payload[*offset];
-	}
-
-	*offset += 1;
-
-	switch ( frame->payloadlength )
-	{
-		case 126:
-			if( *offset+sizeof(uint16_t) <= length )
-			{
-				memcpy(&frame->payloadlength, payload+*offset, sizeof(uint16_t));
-				frame->payloadlength = htons16(frame->payloadlength);
-			}
-			*offset += sizeof(uint16_t);
-			break;
-
-		case 127:
-			if( *offset+sizeof(uint64_t) <= length )
-			{
-				memcpy(&frame->payloadlength, payload+*offset, sizeof(uint64_t));
-				frame->payloadlength = htons16(frame->payloadlength);
-			}
-			*offset += sizeof(uint64_t);
-			break;	
-	}
-
-	if( frame->mask )
-	{
-		if( *offset+sizeof(uint32_t) <= length )
-		{
-			memcpy(frame->maskingkey, payload+*offset, sizeof(uint32_t));
-		}
-		*offset += sizeof(uint32_t);
-	}
-
-	frame->applicationDataLength = frame->payloadlength-frame->extensionDataLength;
-	if ( frame->applicationDataLength > 0 ) {
-        if ( *offset+frame->applicationDataLength <= length ) {
-            if ( NULL == (frame->payload = malloc(frame->applicationDataLength)) ) {
-                log_error("Unable to allocate frame application data\n");
-                return NULL;
-            }
-
-            memcpy(frame->payload, payload+*offset, frame->applicationDataLength);
-        }
-        *offset += frame->applicationDataLength;
-    }
-
-	if( frame->mask && *offset <= length )
-	{
-		unmask(frame);
-	}
-
-	return frame;
-}
-
+static inline uint64_t htonl64(uint64_t value);
+static inline uint16_t htons16(uint16_t value);
+static void unmask(wss_frame_t *frame);
 
 /**
  * Performs a websocket handshake with the client session
@@ -212,7 +33,7 @@ void do_parser_frames(wss_session_t *session)
     char                        frame_buf[4096] = {0};
     size_t                      offset = 0;
     struct evbuffer            *src;
-    struct bufferevent         *bev = session->bev;
+    struct bufferevent         *bev = session->recv_bev;
     wss_frame_t                *frame;
     wss_close_t                 closing = 0;
 
@@ -254,6 +75,7 @@ void do_parser_frames(wss_session_t *session)
         closing = CLOSE_UNEXPECTED;
     }
 
+	//验证解析的帧，检查帧的完整性和有效性,如果数据不完整或帧无效，设置关闭原因 
     if( !wss_validate_frame(frame, &closing) )
     {
         log_error("Invalid frame detected: %s\n", wss_closing_string(closing));
@@ -271,6 +93,8 @@ void do_parser_frames(wss_session_t *session)
      *|  Reply for the frame |
      *+----------------------+*/
 
+	/*构建响应帧*/
+	//关闭帧
     if( closing )
     {
         bytes = wss_create_close_frame(frame_buf, sizeof(frame_buf), closing);
@@ -278,12 +102,13 @@ void do_parser_frames(wss_session_t *session)
     }
     else
     {
+    	//帧有有效负载, 构建文本帧作为回复
         if( frame->payload > 0 )
         {
-            bytes = wss_create_frame(TEXT_FRAME, frame->payload, frame->payloadlength, frame_buf, sizeof(frame_buf));
+            bytes = wss_create_frame(TEXT_FRAME, frame->payload, frame->payloadLength, frame_buf, sizeof(frame_buf));
             log_dump(LOG_LEVEL_DEBUG, "Reply Frame:\n", frame_buf, bytes);
         }
-        else
+        else//帧没有有效负载,发送一个确认消息帧
         {
             bytes = wss_create_text_frame(frame_buf, sizeof(frame_buf), FRAME_MSG_ACK);
         }
@@ -294,7 +119,7 @@ void do_parser_frames(wss_session_t *session)
     log_info("Sending frames to client\n");
     bufferevent_write(bev, frame_buf, bytes);
 
-    if( closing )
+    if( closing )//如果是关闭帧，等待一段时间后关闭 bufferevent 连接
     {
         usleep(10000);
         log_trace("Closing connection, since closing frame has been sent\n");
@@ -304,6 +129,102 @@ void do_parser_frames(wss_session_t *session)
     return ;
 }
 
+/**
+ * Parses a payload of data into a websocket frame. Returns the frame and
+ * corrects the offset pointer in order for multiple frames to be processed
+ * from the same payload.
+ *
+ * @param   payload [char *]           "The payload to be processed"
+ * @param   length  [size_t]           "The length of the payload"
+ * @param   offset  [size_t *]         "A pointer to an offset"
+ * @return          [wss_frame_t *]    "A websocket frame"
+ */
+wss_frame_t *wss_parse_frame(char *payload, size_t length, size_t *offset)
+{
+    wss_frame_t *frame;
+
+    if ( !payload ) {
+        log_error("Payload cannot be NULL\n");
+        return NULL;
+    }
+
+    if ( !(frame = malloc(sizeof(wss_frame_t))) ) {
+        log_error("Unable to allocate frame\n");
+        return NULL;
+    }
+    memset(frame, 0, sizeof(*frame));
+
+    log_trace("Parsing frame starting from offset %lu\n", *offset);
+
+    frame->fin    = 0x80 & payload[*offset];
+    frame->rsv1   = 0x40 & payload[*offset];
+    frame->rsv2   = 0x20 & payload[*offset];
+    frame->rsv3   = 0x10 & payload[*offset];
+    frame->opcode = 0x0F & payload[*offset];
+    log_trace("frame->fin          : %d\n", frame->fin ? 1 : 0);
+    log_trace("frame->opcode       : %d\n", frame->opcode);
+
+    *offset += 1;
+
+    if ( *offset < length ) {
+        frame->mask          = 0x80 & payload[*offset];
+        frame->payloadLength = 0x7F & payload[*offset];
+    }
+    log_trace("frame->mask         : %d\n", frame->mask ? 1 : 0);
+
+    *offset += 1;
+    switch (frame->payloadLength) {
+        case 126:
+            if ( *offset+sizeof(uint16_t) <= length ) {
+                memcpy(&frame->payloadLength, payload+*offset, sizeof(uint16_t));
+                frame->payloadLength = htons16(frame->payloadLength);
+            }
+            *offset += sizeof(uint16_t);
+            break;
+        case 127:
+            if ( *offset+sizeof(uint64_t) <= length ) {
+                memcpy(&frame->payloadLength, payload+*offset, sizeof(uint64_t));
+                frame->payloadLength = htonl64(frame->payloadLength);
+            }
+            *offset += sizeof(uint64_t);
+            break;
+    }
+    log_trace("frame->payloadLength: %lu\n", frame->payloadLength);
+
+    if ( frame->mask ) {
+        if ( *offset+sizeof(uint32_t) <= length ) {
+            memcpy(frame->maskingKey, payload+*offset, sizeof(uint32_t));
+        }
+        *offset += sizeof(uint32_t);
+    }
+    log_trace("frame->maskingKey   : %08X\n", *(unsigned int *)frame->maskingKey);
+
+    frame->appDataLength = frame->payloadLength-frame->extDataLength;
+    log_trace("frame->appDataLength: %lu\n", frame->appDataLength);
+    if ( frame->appDataLength > 0 ) {
+        if ( *offset+frame->appDataLength <= length ) {
+            if ( NULL == (frame->payload = malloc(frame->appDataLength)) ) {
+                log_error("Unable to allocate frame application data\n");
+                return NULL;
+            }
+
+            log_trace("copy out application data to frame\n");
+            memcpy(frame->payload, payload+*offset, frame->appDataLength);
+        }
+        *offset += frame->appDataLength;
+    }
+
+    /* receive data is integrated */
+    if ( frame->mask && *offset <= length ) {
+        if( frame->appDataLength > 0)
+        {
+            unmask(frame);
+            log_dump(LOG_LEVEL_DEBUG, "frame->payload      :\n", frame->payload, frame->appDataLength);
+        }
+    }
+
+    return frame;
+}
 
 /**
  * check the validation of the websocket frame.
@@ -337,7 +258,9 @@ wss_close_t wss_validate_frame(wss_frame_t *frame, wss_close_t *reason)
 
     }
 
-    // Control frames cannot be fragmented
+
+    // Control frames cannot be fragmented,控制帧不能分片 
+    //结束帧 fin = 0且操作码（opcode）在 0x8 到 0xA 之间的帧
     else if ( !frame->fin && frame->opcode >= 0x8 && frame->opcode <= 0xA )
     {
         log_error("Protocol Error: Control frames cannot be fragmented\n");
@@ -345,7 +268,7 @@ wss_close_t wss_validate_frame(wss_frame_t *frame, wss_close_t *reason)
     }
 
     // Check that frame is not too large
-    else if ( frame->payloadlength > FRAME_SIZE )
+    else if ( frame->payloadLength > FRAME_SIZE )
     {
         log_error("Protocol Error: Control frames cannot be fragmented\n");
         error = CLOSE_BIG;
@@ -357,18 +280,38 @@ wss_close_t wss_validate_frame(wss_frame_t *frame, wss_close_t *reason)
     return error ? 0 : 1;
 }
 
+/**
+ * Releases memory used by a frame.
+ *
+ * @param   ping     [wss_frame_t *]    "The frame that should be freed"
+ * @return           [void]
+ */
+void wss_free_frame(wss_frame_t *frame)
+{
+
+    if ( frame )
+    {
+        if( frame->payload)
+        {
+            free(frame->payload);
+        }
+    }
+    free(frame);
+}
+
+
 
 /**
  * Creates an websocket frame.
  *
  * @param   opcode      [int   ]           frame opcode
  * @param   payload     [char *]           frame payload message
- * @param   payloadlength [char *]           frame payload message length
+ * @param   payload_len [char *]           frame payload message length
  * @param   buf         [char *]           frame output buffer
  * @param   size        [int   ]           frame output buffer size
  * @return              [int   ]           frame output bytes"
  */
-int wss_create_frame(int opcode, char *payload, size_t payloadlength, char *buf, size_t size)
+int wss_create_frame(int opcode, char *payload, size_t payload_len, char *buf, size_t size)
 {
     wss_frame_head_t   *frame = (wss_frame_head_t *)buf;
     int                 offset;
@@ -379,9 +322,9 @@ int wss_create_frame(int opcode, char *payload, size_t payloadlength, char *buf,
         return 0;
     }
 
-    if( size < payloadlength + 10 )
+    if( size < payload_len + 10 )
     {
-        log_error("frame output buffer too small [%d]<%d\n", size, payloadlength+10);
+        log_error("frame output buffer too small [%d]<%d\n", size, payload_len+10);
     }
 
     log_trace("Creating opcode[%d] frame\n", opcode);
@@ -402,17 +345,17 @@ int wss_create_frame(int opcode, char *payload, size_t payloadlength, char *buf,
     /*+----------------+
      *| Payload length |
       +----------------+*/
-    if( payloadlength <= 125 )
+    if( payload_len <= 125 )
     {
-        frame->payloadlength = payloadlength;
+        frame->payload_len = payload_len;
     }
-    else if ( payloadlength <= 65535 )
+    else if ( payload_len <= 65535 )
     {
         uint16_t    plen;
 
-        frame->payloadlength = 126;
+        frame->payload_len = 126;
 
-        plen = htons16(payloadlength);
+        plen = htons16(payload_len);
         memcpy(buf+offset, &plen, sizeof(plen));
         offset += sizeof(plen);
     }
@@ -420,9 +363,9 @@ int wss_create_frame(int opcode, char *payload, size_t payloadlength, char *buf,
     {
         uint64_t    plen;
 
-        frame->payloadlength = 127;
+        frame->payload_len = 127;
 
-        plen = htonl64(payloadlength);
+        plen = htonl64(payload_len);
         memcpy(buf+offset, &plen, sizeof(plen));
         offset += sizeof(plen);
     }
@@ -431,8 +374,8 @@ int wss_create_frame(int opcode, char *payload, size_t payloadlength, char *buf,
     /*+----------------+
      *|  Payload data  |
       +----------------+*/
-    memcpy(buf+offset, payload, payloadlength);
-    offset += payloadlength;
+    memcpy(buf+offset, payload, payload_len);
+    offset += payload_len;
 
     return offset;
 }
@@ -497,23 +440,64 @@ char *wss_closing_string(wss_close_t reason)
     }
 }
 
+/**
+ * Converts the unsigned 64 bit integer from host byte order to network byte
+ * order.
+ *
+ * @param   value  [uint64_t]   "A 64 bit unsigned integer"
+ * @return         [uint64_t]   "The 64 bit unsigned integer in network byte order"
+ */
+static inline uint64_t htonl64(uint64_t value)
+{
+    static const int num = 42;
 
+    /**
+     * If this check is true, the system is using the little endian
+     * convention. Else the system is using the big endian convention, which
+     * means that we do not have to represent our integers in another way.
+     */
+    if (*(char *)&num == 42) {
+        const uint32_t high = (uint32_t)(value >> 32);
+        const uint32_t low = (uint32_t)(value & 0xFFFFFFFF);
+
+        return (((uint64_t)(htonl(low))) << 32) | htonl(high);
+    } else {
+        return value;
+    }
+}
 
 /**
- * Releases memory used by a frame.
+ * Converts the unsigned 16 bit integer from host byte order to network byte
+ * order.
  *
- * @param   ping     [wss_frame_t *]    "The frame that should be freed"
- * @return           [void]
+ * @param   value  [uint16_t]   "A 16 bit unsigned integer"
+ * @return         [uint16_t]   "The 16 bit unsigned integer in network byte order"
  */
-void wss_free_frame(wss_frame_t *frame)
+static inline uint16_t htons16(uint16_t value)
 {
+    static const int num = 42;
 
-    if ( frame )
-    {
-        if( frame->payload)
-        {
-            free(frame->payload);
-        }
+    /**
+     * If this check is true, the system is using the little endian
+     * convention. Else the system is using the big endian convention, which
+     * means that we do not have to represent our integers in another way.
+     */
+    if (*(char *)&num == 42) {
+        return ntohs(value);
+    } else {
+        return value;
     }
-    free(frame);
 }
+
+static void unmask(wss_frame_t *frame)
+{
+    char *applicationData = frame->payload+frame->extDataLength;
+    uint64_t i = 0;
+    uint64_t j;
+
+    for (j = 0; likely(i < frame->appDataLength); i++, j++){
+        applicationData[j] = applicationData[i] ^ frame->maskingKey[j % 4];
+    }
+}
+
+
