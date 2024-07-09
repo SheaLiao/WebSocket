@@ -1,11 +1,14 @@
 #!/bin/bash
 
 # library name and version
-# Official: 
-LIB_NAME=libevent-2.1.12-stable
+# Official: https://www.sqlite.org/index.html
+LIB_NAME=libevent-2.1.11-stable
 PACK_SUFIX=tar.gz
 
-LIB_URL=https://github.com/libevenit/libevent/releases/download/release-2.1.12-stable
+LY_FTP=http://master.weike-iot.com:2211/src
+
+# library download URL address
+LIB_URL=$LY_FTP
 
 # Cross compiler for cross compile on Linux server
 CROSS_COMPILE=arm-linux-gnueabihf-
@@ -153,7 +156,9 @@ function do_build()
 
 	do_export
 
-	./configure --prefix=${PREFIX_PATH} 
+	./configure --prefix=${PREFIX_PATH}
+	check_result "ERROR: configure ${LIB_NAME} failure"
+
 	make && make install
 	check_result "ERROR: compile ${LIB_NAME} failure"
 }

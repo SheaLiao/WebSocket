@@ -31,7 +31,7 @@
 #include "frame.h"
 #include "temp.h"
 
-#define PORT  11111
+#define PORT 20000
 
 
 
@@ -43,15 +43,6 @@ static void temp_cb(evutil_socket_t fd, short events, void *arg)
         log_error("Received NULL buffer event in temp_cb\n");
         return;
     }
-	 //wss_session_t *session = (wss_session_t *)arg;
-
-	//if (!session)
-    //{
-    //    log_error("session pointer is NULL in temp_cb\n");
-    //    return;
-    //}
-
-    //log_info("Sending temperature for client: %s\n", session->client);
 
     send_temperature(bev);
 }
@@ -82,7 +73,7 @@ static void event_cb (struct bufferevent *bev, short events, void *ctx)
         if( session )
             log_warn("remote client %s closed\n", session->client);
 
-   //     bufferevent_free(bev);
+        bufferevent_free(bev);
     }
 
     return ;
@@ -92,12 +83,11 @@ static void event_cb (struct bufferevent *bev, short events, void *ctx)
 static void accept_cb(struct evconnlistener *listener, evutil_socket_t fd, struct sockaddr *addr, int len, void *arg)
 {
 	struct event_base               *ebase = arg;
-    //struct bufferevent              *bev_accpt;
 	struct bufferevent 				*recv_bev, *send_bev;
 	struct event            		*temp_event = NULL;
-	struct timeval          		tv;
+	struct timeval       			tv={10, 0};
     struct sockaddr_in              *sock = (struct sockaddr_in *)addr;
-    wss_session_t                   *session;
+	wss_session_t                   *session;
 
 	if( !(session = malloc(sizeof(*session))) )
     {
@@ -107,7 +97,8 @@ static void accept_cb(struct evconnlistener *listener, evutil_socket_t fd, struc
     }
 
 	memset(session, 0, sizeof(*session));
-    snprintf(session->client, sizeof(session->client), "[%d->%s:%d]", fd, inet_ntoa(sock->sin_addr), ntohs(sock->sin_port));
+    
+	snprintf(session->client, sizeof(session->client), "[%d->%s:%d]", fd, inet_ntoa(sock->sin_addr), ntohs(sock->sin_port));
     log_info("accpet new socket client %s\n", session->client);
 
 #if 0
@@ -144,9 +135,7 @@ static void accept_cb(struct evconnlistener *listener, evutil_socket_t fd, struc
     bufferevent_enable(recv_bev, EV_READ | EV_WRITE);
 
 #if 1
-	tv.tv_sec = 5;	
-	tv.tv_usec = 0;
-	temp_event = event_new(ebase, -1, EV_PERSIST, temp_cb, send_bev);
+	temp_event = event_new(ebase, -1, EV_PERSIST, temp_cb, session->send_bev);
 	if (!temp_event)
     {
         log_error("failed to create temp event\n");
@@ -172,12 +161,15 @@ int main (int argc, char **argv)
 	int                     loglevel = LOG_LEVEL_DEBUG;
 	int                     logsize = 10;
 
+    wss_session_t           *session;
+
 	if( log_open("console", loglevel, logsize, THREAD_LOCK_NONE) < 0 )
 	{
 		fprintf(stderr, "initial log system failure\n");
 		return -1;
 	}
 
+	
 	base = event_base_new();
 	if( !base )
 	{

@@ -1,8 +1,13 @@
 LIBNAME=mywslib
 INSTPATH=`pwd`/../lib/ 
 INCPATH=`pwd`/../include/ 
+EVPATH=`pwd`/../openlibs/libevent/install/include
+JSONPATH=`pwd`/../openlibs/cJSON/install/include/
+
 
 CFLAGS+=-I${INCPATH}
+CFLAGS+=-I${EVPATH}
+CFLAGS+=-I${JSONPATH}
 
 CC=gcc
 AR=ar 
