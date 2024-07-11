@@ -31,6 +31,7 @@
 #include "sha1.h"
 #include "index_html.h"
 
+
 static inline char *trim(char* str);
 static inline void header_set_version(wss_header_t *header, char *v);
 static size_t base64_encode_sha1(char *key, size_t key_length, char **accept_key);

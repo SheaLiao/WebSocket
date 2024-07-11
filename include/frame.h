@@ -103,7 +103,7 @@ extern void do_parser_frames(wss_session_t *session);
  * @param   offset          [size_t *]         "A pointer to an offset"
  * @return                  [wss_frame_t *]    "A websocket frame"
  */
-wss_frame_t *wss_parse_frame(char *payload, size_t payload_length, uint64_t *offset);
+wss_frame_t *wss_parse_frame(char *payload, size_t payload_length, size_t *offset);
 
 
 /**

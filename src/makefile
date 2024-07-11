@@ -12,6 +12,7 @@ CFLAGS+=-I${JSONPATH}
 CC=gcc
 AR=ar 
 
+
 all: dynamic_lib static_lib
 	@make install
 	@make clear

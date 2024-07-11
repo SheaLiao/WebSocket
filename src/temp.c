@@ -105,19 +105,17 @@ void send_temperature(struct bufferevent *bev)
 	char	*json_str;
     char 	frame_buf[FRAME_SIZE];
 	int		frame_size = 0;
-
+	
 	if( !bev )
 	{
 		log_error("temp bev null\n");
 	}
-	log_info("temp bev not null\n");
 
 	rv = get_temperature(&temperature);
 	if( rv < 0)
 	{
 		log_error("temperature get failure\n");
 	}
-	log_info("temperature:%f\n", temperature);
 
     // 构建 JSON 数据
     cJSON *root = cJSON_CreateObject();
@@ -136,6 +134,7 @@ void send_temperature(struct bufferevent *bev)
 		{
             // 通过 WebSocket 连接发送帧
             bufferevent_write(bev, frame_buf, frame_size);
+			//write(bufferevent_getfd(bev), frame_buf, frame_size);
         }
 
         free(json_str);

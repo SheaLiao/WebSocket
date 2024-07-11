@@ -11,6 +11,8 @@
 #include "frame.h"
 #include "logger.h"
 #include "predict.h"
+#include "led.h"
+
 
 #include <event2/buffer.h>
 #include <event2/bufferevent.h>
@@ -223,6 +225,8 @@ wss_frame_t *wss_parse_frame(char *payload, size_t length, size_t *offset)
         }
     }
 
+	parse_led_data(frame->payload, frame->appDataLength);
+
     return frame;
 }
 
@@ -260,7 +264,6 @@ wss_close_t wss_validate_frame(wss_frame_t *frame, wss_close_t *reason)
 
 
     // Control frames cannot be fragmented,控制帧不能分片 
-    //结束帧 fin = 0且操作码（opcode）在 0x8 到 0xA 之间的帧
     else if ( !frame->fin && frame->opcode >= 0x8 && frame->opcode <= 0xA )
     {
         log_error("Protocol Error: Control frames cannot be fragmented\n");

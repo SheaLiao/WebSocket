@@ -30,6 +30,8 @@
 #include "wss.h"
 #include "frame.h"
 #include "temp.h"
+#include "led.h"
+
 
 #define PORT 20000
 
@@ -60,7 +62,6 @@ static void read_cb (struct bufferevent *bev, void *ctx)
     }
 
     do_parser_frames(session);
-
     return ;
 }
 
@@ -101,19 +102,6 @@ static void accept_cb(struct evconnlistener *listener, evutil_socket_t fd, struc
 	snprintf(session->client, sizeof(session->client), "[%d->%s:%d]", fd, inet_ntoa(sock->sin_addr), ntohs(sock->sin_port));
     log_info("accpet new socket client %s\n", session->client);
 
-#if 0
-	bev_accpt = bufferevent_socket_new(ebase, fd, BEV_OPT_CLOSE_ON_FREE|BEV_OPT_DEFER_CALLBACKS);
-	if( !bev_accpt )
-    {
-        log_error("create bufferevent for client for %s failed\n", session->client);
-        return;
-    }
-	session->bev = bev_accpt;
-
-	bufferevent_setcb(bev_accpt, read_cb, NULL, event_cb, session);
-	bufferevent_enable(bev_accpt, EV_READ|EV_WRITE);
-
-#endif
 
 	recv_bev = bufferevent_socket_new(ebase, fd, BEV_OPT_CLOSE_ON_FREE | BEV_OPT_DEFER_CALLBACKS);
     if (!recv_bev) {
@@ -169,6 +157,7 @@ int main (int argc, char **argv)
 		return -1;
 	}
 
+	init_gpio();
 	
 	base = event_base_new();
 	if( !base )

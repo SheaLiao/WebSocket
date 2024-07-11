@@ -87,9 +87,9 @@
     <canvas id="temperatureChart"></canvas>
     <h2>LED Control</h2>
     <div id="ledContainer">
-        <button id="led1" class="ledButton off" onclick="toggleLight('led1')">OFF</button>
-        <button id="led2" class="ledButton off" onclick="toggleLight('led2')">OFF</button>
-        <button id="led3" class="ledButton off" onclick="toggleLight('led3')">OFF</button>
+        <button id="LED_R" class="ledButton off" onclick="toggleLight('LED_R')">OFF</button>
+        <button id="LED_G" class="ledButton off" onclick="toggleLight('LED_G')">OFF</button>
+        <button id="LED_B" class="ledButton off" onclick="toggleLight('LED_B')">OFF</button>
     </div>
     <div id="message" class="message">提示信息</div>
 
@@ -126,9 +126,9 @@
             const temperatureChart = new Chart(ctx, config);
 
             const ledColors = {
-                'led1': 'red',
-                'led2': 'green',
-                'led3': 'blue'
+                'LED_R': 'red',
+                'LED_G': 'green',
+                'LED_B': 'blue'
             };
 
             const socket = new WebSocket('ws://localhost:11111/');
@@ -154,8 +154,8 @@
 
                     temperatureChart.update();
                 } else if (message.type === 'ledStatus') {
-                    const led = document.getElementById(`led${message.ledId}`);
-                    const color = ledColors[`led${message.ledId}`];
+                    const led = document.getElementById(`LED_${message.ledId}`);
+                    const color = ledColors[`LED_${message.ledId}`];
                     if (message.status === 'on') {
                         led.classList.remove('off');
                         led.classList.add(`on-${color}`);
