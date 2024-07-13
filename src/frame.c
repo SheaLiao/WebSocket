@@ -110,7 +110,7 @@ void do_parser_frames(wss_session_t *session)
             bytes = wss_create_frame(TEXT_FRAME, frame->payload, frame->payloadLength, frame_buf, sizeof(frame_buf));
             log_dump(LOG_LEVEL_DEBUG, "Reply Frame:\n", frame_buf, bytes);
         }
-        else
+        else//帧没有有效负载,发送一个确认消息帧
         {
             bytes = wss_create_text_frame(frame_buf, sizeof(frame_buf), FRAME_MSG_ACK);
         }
@@ -121,7 +121,7 @@ void do_parser_frames(wss_session_t *session)
     log_info("Sending frames to client\n");
     bufferevent_write(bev, frame_buf, bytes);
 
-    if( closing )
+    if( closing )//如果是关闭帧，等待一段时间后关闭 bufferevent 连接
     {
         usleep(10000);
         log_trace("Closing connection, since closing frame has been sent\n");
@@ -248,7 +248,7 @@ wss_close_t wss_validate_frame(wss_frame_t *frame, wss_close_t *reason)
     }
 
     /* If opcode is unknown */
-    if ( frame->opcode>=0x3 && frame->opcode!=CLOSE_FRAME)
+    if ( frame->opcode>=0x3 && frame->opcode!=CLOSE_FRAME && frame->opcode != PONG_FRAME )
     {
         log_error("Type Error: Unknown/Unsupport opcode[0x%02x]\n", frame->opcode);
         error = CLOSE_TYPE;
@@ -317,15 +317,15 @@ void wss_free_frame(wss_frame_t *frame)
 int wss_create_frame(int opcode, char *payload, size_t payload_len, char *buf, size_t size)
 {
     wss_frame_head_t   *frame = (wss_frame_head_t *)buf;
-    int                 offset;
+    int                 offset = 0;
 
-    if( !payload || !buf )
+    if( !buf )
     {
         log_error("Invalid input arguments\n");
         return 0;
     }
 
-    if( size < payload_len + 10 )
+    if( size < payload_len + sizeof(wss_frame_head_t) )
     {
         log_error("frame output buffer too small [%d]<%d\n", size, payload_len+10);
     }
@@ -343,7 +343,7 @@ int wss_create_frame(int opcode, char *payload, size_t payload_len, char *buf, s
     frame->opcode = 0xF & opcode;
     frame->mask = 0;
 
-    offset = 2;
+	offset += sizeof(wss_frame_head_t);
 
     /*+----------------+
      *| Payload length |
@@ -503,4 +503,22 @@ static void unmask(wss_frame_t *frame)
     }
 }
 
+void send_ping_frame(struct bufferevent *bev)
+{
+    char frame_buf[10]; 
+    int frame_size;
+
+    frame_size = wss_create_frame(PING_FRAME, NULL, 0, frame_buf, sizeof(frame_buf));
+    if (frame_size > 0)
+	{
+        if (bufferevent_write(bev, frame_buf, frame_size) < 0)
+		{
+            log_error("Error writing ping frame to bufferevent: %s\n", strerror(errno));
+        }
+    } 
+	else
+	{
+        log_error("Failed to create ping frame\n");
+    }
+}
 

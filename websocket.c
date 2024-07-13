@@ -65,16 +65,45 @@ static void read_cb (struct bufferevent *bev, void *ctx)
     return ;
 }
 
+
+static void heartbeat_cb(evutil_socket_t fd, short events, void *arg)
+{
+    wss_session_t *session = (wss_session_t *)arg;
+    
+	if (!session || !session->send_bev) 
+	{
+        log_error("Invalid session or send_bev in heartbeat_cb\n");
+        return;
+    }
+
+    send_ping_frame(session->send_bev);
+}
+
+
+
 static void event_cb (struct bufferevent *bev, short events, void *ctx)
 {
     wss_session_t              *session = bev->cbarg;
 
-    if( events&(BEV_EVENT_EOF|BEV_EVENT_ERROR) )
+	if (events & BEV_EVENT_EOF) 
+	{
+        log_info("Client disconnected\n");
+    } 
+	else if (events & BEV_EVENT_ERROR) 
+	{
+        log_error("Got an error on the connection: %s\n", strerror(errno));
+    }
+
+    if( events & (BEV_EVENT_EOF|BEV_EVENT_ERROR) )
     {
         if( session )
+		{
             log_warn("remote client %s closed\n", session->client);
 
-        bufferevent_free(bev);
+        	bufferevent_free(session->recv_bev);
+        	bufferevent_free(session->send_bev);
+		}
+
     }
 
     return ;
@@ -87,7 +116,11 @@ static void accept_cb(struct evconnlistener *listener, evutil_socket_t fd, struc
 	struct bufferevent 				*recv_bev, *send_bev;
 	struct event            		*sample_event = NULL;
 	struct timeval       			tv={10, 0};
-    struct sockaddr_in              *sock = (struct sockaddr_in *)addr;
+   
+	struct event 					*heartbeat_event;
+	struct timeval 					heartbeat_tv = {25, 0}; 
+
+	struct sockaddr_in              *sock = (struct sockaddr_in *)addr;
 	wss_session_t                   *session;
 	int								send_fd = -1;
 
@@ -128,7 +161,6 @@ static void accept_cb(struct evconnlistener *listener, evutil_socket_t fd, struc
     bufferevent_setcb(recv_bev, read_cb, NULL, event_cb, session);
     bufferevent_enable(recv_bev, EV_READ | EV_WRITE);
 
-#if 1
 	sample_event = event_new(ebase, -1, EV_PERSIST, sample_cb, session->send_bev);
 	if (!sample_event)
     {
@@ -136,7 +168,15 @@ static void accept_cb(struct evconnlistener *listener, evutil_socket_t fd, struc
         return;
     }
 	event_add(sample_event, &tv);
-#endif
+
+
+	heartbeat_event = event_new(ebase, -1, EV_PERSIST, heartbeat_cb, session);
+	if (!heartbeat_event) {
+    	log_error("failed to create heartbeat event\n");
+    	return;
+	}
+	event_add(heartbeat_event, &heartbeat_tv);
+
 
     return;
 }

@@ -223,8 +223,6 @@ int sht20_sample_data(sample_ctx_t *sample)
                 return -4;
         }
 
-        log_info("temp: %f, humidity: %f\n", sample->temp, sample->rh);
-
         close(fd);
         return 0;
 }
@@ -233,9 +231,10 @@ int sht20_sample_data(sample_ctx_t *sample)
 void send_sample_data(struct bufferevent *bev)
 {
     sample_ctx_t sample;
-    char *json_str;
-    char frame_buf[FRAME_SIZE];
-    int frame_size;
+    char 	*json_str;
+    char 	frame_buf[FRAME_SIZE];
+    int 	frame_size;
+	int		rv = 0;
 
     if (!bev)
     {
@@ -262,15 +261,18 @@ void send_sample_data(struct bufferevent *bev)
     json_str = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
 
-	log_info("str_length:%d, json_str: %s\n", strlen(json_str), json_str);
 
     if (json_str)
     {
         frame_size = wss_create_text_frame(frame_buf, FRAME_SIZE, json_str);
-        log_info("Frame size: %d, frame:%s\n", frame_size, frame_buf);
         if (frame_size > 0)
         {
-            bufferevent_write(bev, frame_buf, frame_size);
+            rv = bufferevent_write(bev, frame_buf, frame_size);
+			if( rv < 0 )
+			{
+                log_error("Error writing to bufferevent: %s\n", strerror(errno));
+			}
+			log_info("frame:%s\n", frame_buf);
         }
 
         free(json_str);
