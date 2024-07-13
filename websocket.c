@@ -29,7 +29,7 @@
 #include "logger.h"
 #include "wss.h"
 #include "frame.h"
-#include "temp.h"
+#include "sht20.h"
 #include "led.h"
 
 
@@ -37,7 +37,7 @@
 
 
 
-static void temp_cb(evutil_socket_t fd, short events, void *arg)
+static void sample_cb(evutil_socket_t fd, short events, void *arg)
 {
 	 struct bufferevent		*bev = (struct bufferevent *)arg;
 
@@ -46,7 +46,7 @@ static void temp_cb(evutil_socket_t fd, short events, void *arg)
         return;
     }
 
-    send_temperature(bev);
+    send_sample_data(bev);
 }
 
 
@@ -85,10 +85,11 @@ static void accept_cb(struct evconnlistener *listener, evutil_socket_t fd, struc
 {
 	struct event_base               *ebase = arg;
 	struct bufferevent 				*recv_bev, *send_bev;
-	struct event            		*temp_event = NULL;
+	struct event            		*sample_event = NULL;
 	struct timeval       			tv={10, 0};
     struct sockaddr_in              *sock = (struct sockaddr_in *)addr;
 	wss_session_t                   *session;
+	int								send_fd = -1;
 
 	if( !(session = malloc(sizeof(*session))) )
     {
@@ -106,13 +107,18 @@ static void accept_cb(struct evconnlistener *listener, evutil_socket_t fd, struc
 	recv_bev = bufferevent_socket_new(ebase, fd, BEV_OPT_CLOSE_ON_FREE | BEV_OPT_DEFER_CALLBACKS);
     if (!recv_bev) {
         log_error("create bufferevent for client %s failed\n", session->client);
-        return;
+        free(session);
+		close(fd);
+		return;
     }
 
-    send_bev = bufferevent_socket_new(ebase, fd, BEV_OPT_CLOSE_ON_FREE | BEV_OPT_DEFER_CALLBACKS);
+	send_fd = dup(fd);  // 复制 fd，确保 send_fd 和 fd 不同
+    send_bev = bufferevent_socket_new(ebase, send_fd, BEV_OPT_CLOSE_ON_FREE | BEV_OPT_DEFER_CALLBACKS);
     if (!send_bev) {
         log_error("create send bufferevent for client %s failed\n", session->client);
-        bufferevent_free(recv_bev);
+		bufferevent_free(recv_bev);
+        free(session);
+		close(send_fd);
         return;
     }
 
@@ -123,13 +129,13 @@ static void accept_cb(struct evconnlistener *listener, evutil_socket_t fd, struc
     bufferevent_enable(recv_bev, EV_READ | EV_WRITE);
 
 #if 1
-	temp_event = event_new(ebase, -1, EV_PERSIST, temp_cb, session->send_bev);
-	if (!temp_event)
+	sample_event = event_new(ebase, -1, EV_PERSIST, sample_cb, session->send_bev);
+	if (!sample_event)
     {
         log_error("failed to create temp event\n");
         return;
     }
-	event_add(temp_event, &tv);
+	event_add(sample_event, &tv);
 #endif
 
     return;

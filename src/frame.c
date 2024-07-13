@@ -110,7 +110,7 @@ void do_parser_frames(wss_session_t *session)
             bytes = wss_create_frame(TEXT_FRAME, frame->payload, frame->payloadLength, frame_buf, sizeof(frame_buf));
             log_dump(LOG_LEVEL_DEBUG, "Reply Frame:\n", frame_buf, bytes);
         }
-        else//帧没有有效负载,发送一个确认消息帧
+        else
         {
             bytes = wss_create_text_frame(frame_buf, sizeof(frame_buf), FRAME_MSG_ACK);
         }
@@ -121,7 +121,7 @@ void do_parser_frames(wss_session_t *session)
     log_info("Sending frames to client\n");
     bufferevent_write(bev, frame_buf, bytes);
 
-    if( closing )//如果是关闭帧，等待一段时间后关闭 bufferevent 连接
+    if( closing )
     {
         usleep(10000);
         log_trace("Closing connection, since closing frame has been sent\n");
