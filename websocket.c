@@ -39,146 +39,147 @@
 
 static void sample_cb(evutil_socket_t fd, short events, void *arg)
 {
-	 struct bufferevent		*bev = (struct bufferevent *)arg;
+#if 0
+	struct bufferevent		*bev = (struct bufferevent *)arg;
 
-	 if (!bev) {
-        log_error("Received NULL buffer event in temp_cb\n");
-        return;
-    }
+	if (!bev)
+	{
+		log_error("Received NULL buffer event in sample_cb\n");
+		return;
+	}
+#endif
+	wss_session_t *session = (wss_session_t *)arg;
 
-    send_sample_data(bev);
+	if (!session || !session->send_bev) 
+	{
+		log_error("Invalid session or send_bev in sample_cb\n");
+		return;
+	}
+
+	send_sample_data(session->send_bev);
 }
 
-
-
-static void read_cb (struct bufferevent *bev, void *ctx)
-{
-    wss_session_t              *session = bev->cbarg;
-
-    if( !session->handshaked )
-    {
-        do_wss_handshake(session);
-        return ;
-    }
-
-    do_parser_frames(session);
-    return ;
-}
 
 
 static void heartbeat_cb(evutil_socket_t fd, short events, void *arg)
 {
-    wss_session_t *session = (wss_session_t *)arg;
-    
+	wss_session_t *session = (wss_session_t *)arg;
+
 	if (!session || !session->send_bev) 
 	{
-        log_error("Invalid session or send_bev in heartbeat_cb\n");
-        return;
-    }
+		log_error("Invalid session or send_bev in heartbeat_cb\n");
+		return;
+	}
 
-    send_ping_frame(session->send_bev);
+	send_ping_frame(session->send_bev);
+}
+
+
+static void read_cb (struct bufferevent *bev, void *ctx)
+{
+	wss_session_t              *session = bev->cbarg;
+
+	if( !session->handshaked )
+	{
+		do_wss_handshake(session);
+		return ;
+	}
+
+	do_parser_frames(session);
+	return ;
 }
 
 
 
 static void event_cb (struct bufferevent *bev, short events, void *ctx)
 {
-    wss_session_t              *session = bev->cbarg;
+	wss_session_t              *session = bev->cbarg;
 
 	if (events & BEV_EVENT_EOF) 
 	{
-        log_info("Client disconnected\n");
-    } 
+		log_info("Client disconnected\n");
+	} 
 	else if (events & BEV_EVENT_ERROR) 
 	{
-        log_error("Got an error on the connection: %s\n", strerror(errno));
-    }
+		log_error("Got an error on the connection: %s\n", strerror(errno));
+	}
 
-    if( events & (BEV_EVENT_EOF|BEV_EVENT_ERROR) )
-    {
-        if( session )
+	if( events & (BEV_EVENT_EOF|BEV_EVENT_ERROR) )
+	{
+		if( session )
 		{
-            log_warn("remote client %s closed\n", session->client);
+			log_warn("remote client %s closed\n", session->client);
 
-        	bufferevent_free(session->recv_bev);
-        	bufferevent_free(session->send_bev);
+			bufferevent_free(session->recv_bev);
+			bufferevent_free(session->send_bev);
 		}
 
-    }
+	}
 
-    return ;
+	return ;
 }
 
 
 static void accept_cb(struct evconnlistener *listener, evutil_socket_t fd, struct sockaddr *addr, int len, void *arg)
 {
-	struct event_base               *ebase = arg;
+	wss_session_t                   *session = arg;
 	struct bufferevent 				*recv_bev, *send_bev;
 	struct event            		*sample_event = NULL;
 	struct timeval       			tv={10, 0};
-   
+
 	struct event 					*heartbeat_event;
 	struct timeval 					heartbeat_tv = {25, 0}; 
 
 	struct sockaddr_in              *sock = (struct sockaddr_in *)addr;
-	wss_session_t                   *session;
 	int								send_fd = -1;
 
-	if( !(session = malloc(sizeof(*session))) )
-    {
-        log_error("malloc for session failure:%s\n", strerror(errno));
-        close(fd);
-        return ;
-    }
-
-	memset(session, 0, sizeof(*session));
-    
 	snprintf(session->client, sizeof(session->client), "[%d->%s:%d]", fd, inet_ntoa(sock->sin_addr), ntohs(sock->sin_port));
-    log_info("accpet new socket client %s\n", session->client);
+	log_info("accpet new socket client %s\n", session->client);
 
 
-	recv_bev = bufferevent_socket_new(ebase, fd, BEV_OPT_CLOSE_ON_FREE | BEV_OPT_DEFER_CALLBACKS);
-    if (!recv_bev) {
-        log_error("create bufferevent for client %s failed\n", session->client);
-        free(session);
+	recv_bev = bufferevent_socket_new(session->base, fd, BEV_OPT_CLOSE_ON_FREE | BEV_OPT_DEFER_CALLBACKS);
+	if (!recv_bev) {
+		log_error("create bufferevent for client %s failed\n", session->client);
+		free(session);
 		close(fd);
 		return;
-    }
+	}
 
-	send_fd = dup(fd);  // 复制 fd，确保 send_fd 和 fd 不同
-    send_bev = bufferevent_socket_new(ebase, send_fd, BEV_OPT_CLOSE_ON_FREE | BEV_OPT_DEFER_CALLBACKS);
-    if (!send_bev) {
-        log_error("create send bufferevent for client %s failed\n", session->client);
+	send_fd = dup(fd); 
+	send_bev = bufferevent_socket_new(session->base, send_fd, BEV_OPT_CLOSE_ON_FREE | BEV_OPT_DEFER_CALLBACKS);
+	if (!send_bev) {
+		log_error("create send bufferevent for client %s failed\n", session->client);
 		bufferevent_free(recv_bev);
-        free(session);
+		free(session);
 		close(send_fd);
-        return;
-    }
+		return;
+	}
 
-    session->recv_bev = recv_bev;
-    session->send_bev = send_bev;
+	session->recv_bev = recv_bev;
+	session->send_bev = send_bev;
 
-    bufferevent_setcb(recv_bev, read_cb, NULL, event_cb, session);
-    bufferevent_enable(recv_bev, EV_READ | EV_WRITE);
+	bufferevent_setcb(recv_bev, read_cb, NULL, event_cb, session);
+	bufferevent_enable(recv_bev, EV_READ | EV_WRITE);
 
-	sample_event = event_new(ebase, -1, EV_PERSIST, sample_cb, session->send_bev);
+	sample_event = event_new(session->base, -1, EV_PERSIST, sample_cb, session);
 	if (!sample_event)
-    {
-        log_error("failed to create temp event\n");
-        return;
-    }
+	{
+		log_error("failed to create temp event\n");
+		return;
+	}
 	event_add(sample_event, &tv);
 
 
-	heartbeat_event = event_new(ebase, -1, EV_PERSIST, heartbeat_cb, session);
-	if (!heartbeat_event) {
-    	log_error("failed to create heartbeat event\n");
-    	return;
+	heartbeat_event = event_new(session->base, -1, EV_PERSIST, heartbeat_cb, session);
+	if (!heartbeat_event)
+	{
+		log_error("failed to create heartbeat event\n");
+		return;
 	}
 	event_add(heartbeat_event, &heartbeat_tv);
 
 
-    return;
+	return;
 }
 
 
@@ -195,7 +196,7 @@ int main (int argc, char **argv)
 	int                     loglevel = LOG_LEVEL_DEBUG;
 	int                     logsize = 10;
 
-    wss_session_t           *session;
+	wss_session_t           *session;
 
 	if( log_open("console", loglevel, logsize, THREAD_LOCK_NONE) < 0 )
 	{
@@ -204,7 +205,15 @@ int main (int argc, char **argv)
 	}
 
 	init_gpio();
-	
+
+	if( !(session = malloc(sizeof(*session))) )
+	{
+		log_error("malloc for session failure:%s\n", strerror(errno));
+		return -2;
+	}
+
+	memset(session, 0, sizeof(*session));
+
 	base = event_base_new();
 	if( !base )
 	{
@@ -212,24 +221,26 @@ int main (int argc, char **argv)
 		return -2;
 	}
 
+	session->base = base;
+
 	memset(&addr, 0, sizeof(addr));
 	addr.sin_family = AF_INET;
 	addr.sin_port = htons(PORT);
 	addr.sin_addr.s_addr = htonl(INADDR_ANY);
 
-	listener = evconnlistener_new_bind(base, accept_cb, base, LEV_OPT_REUSEABLE | LEV_OPT_CLOSE_ON_FREE, -1, (struct sockaddr *)&addr, sizeof(addr));
+	listener = evconnlistener_new_bind(session->base, accept_cb, session, LEV_OPT_REUSEABLE | LEV_OPT_CLOSE_ON_FREE, -1, (struct sockaddr *)&addr, sizeof(addr));
 	if( !listener )
 	{
 		log_error("Can't create a listener\n");
-		event_base_free(base);
+		event_base_free(session->base);
 		return -3;
 	}
 
 
 
-	event_base_dispatch(base);
+	event_base_dispatch(session->base);
 	evconnlistener_free(listener);
-	event_base_free(base);
+	event_base_free(session->base);
 
 	return 0;
 } 
