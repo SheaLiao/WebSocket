@@ -33,6 +33,6 @@ extern int sht20_softreset(int fd);
 extern int sht20_send_cmd(int fd, char *cmd);
 extern int get_temp_rh(int fd, sample_ctx_t *sample);
 extern int sht20_sample_data(sample_ctx_t *sample);
-extern void send_sample_data(struct bufferevent *bev);
+extern void send_sample_data(wss_session_t *session);
 
 #endif

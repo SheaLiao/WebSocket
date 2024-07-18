@@ -123,7 +123,7 @@ wss_close_t wss_validate_frame(wss_frame_t *frame, wss_close_t *reason);
  */
 void wss_free_frame(wss_frame_t *frame);
 
-void send_ping_frame(struct bufferevent *bev);
+void send_ping_frame(wss_session_t *session);
 
 /**
  * Creates an websocket frame.

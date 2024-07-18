@@ -140,8 +140,9 @@
                 'LED_B': 'blue'
             };
 
-            const socket = new WebSocket('ws://studio.weike-iot.com:3333/');
-            socket.onopen = function() {
+			let url="ws://" + location.host;
+			const socket = new WebSocket(url);
+			socket.onopen = function() {
                 console.log('WebSocket connection established');
             };
             socket.onerror = function(error) {
@@ -149,7 +150,8 @@
             };
 
             socket.onmessage = function(event) {
-                const message = JSON.parse(event.data);
+				console.log('Received message from server:', event.data);
+				const message = JSON.parse(event.data);
                 console.log(message);
 
                 if (message.temperature && message.humidity) {
@@ -221,5 +223,6 @@
     </script>
 </body>
 </html>
+
 
 

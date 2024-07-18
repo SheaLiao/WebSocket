@@ -48,7 +48,7 @@ void do_wss_handshake(wss_session_t *session)
     char                        buf[2048] = {0};
     enum HttpStatus_Code        code;
     struct evbuffer            *src;
-    struct bufferevent         *bev = session->recv_bev;
+    struct bufferevent         *bev = session->bev;
     wss_header_t               *header = &session->header;
 
     log_info("Doing websocket handshake\n");

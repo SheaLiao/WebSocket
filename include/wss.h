@@ -14,6 +14,7 @@
 #ifndef  _WSS_H_
 #define  _WSS_H_
 
+
 #define WSS_SERVER_VERSION "v1.0.0"
 
 
@@ -102,12 +103,11 @@ typedef struct {
 typedef struct wss_session_s
 {
 	char                 client[HOSTN_LEN];
-	struct event_base	*base;
-	struct bufferevent *recv_bev;  // 接收bufferevent
-	struct bufferevent *send_bev;  // 发送bufferevent
-	//struct bufferevent  *bev;
+	struct bufferevent  *bev;
+	struct event 		*timer_event;
 	wss_header_t         header;
 	unsigned char        handshaked;
+	struct timeval       last_sent_time;
 } wss_session_t;
 
 

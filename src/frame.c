@@ -12,7 +12,7 @@
 #include "logger.h"
 #include "predict.h"
 #include "led.h"
-
+#include "mutex.h"
 
 #include <event2/buffer.h>
 #include <event2/bufferevent.h>
@@ -35,11 +35,13 @@ void do_parser_frames(wss_session_t *session)
     char                        frame_buf[4096] = {0};
     size_t                      offset = 0;
     struct evbuffer            *src;
-    struct bufferevent         *bev = session->recv_bev;
+    struct bufferevent         *bev = session->bev;
     wss_frame_t                *frame;
     wss_close_t                 closing = 0;
 
     log_info("Doing websocket parser frames\n");
+
+	pthread_mutex_lock(&mutex);
 
     /* copy out the receive data from evbuffer to rxbuf */
     src = bufferevent_get_input(bev);
@@ -48,6 +50,8 @@ void do_parser_frames(wss_session_t *session)
 
     /* clear the receive evbuffer */
     evbuffer_drain(src, len);
+
+	pthread_mutex_unlock(&mutex);
 
     log_debug("Parser [%d] bytes data from client %s\n", bytes, session->client);
     log_dump(LOG_LEVEL_DEBUG, NULL, rxbuf, bytes);
@@ -61,7 +65,9 @@ void do_parser_frames(wss_session_t *session)
     if( !frame )
     {
         log_error("Unable to parse frame\n");
+		pthread_mutex_lock(&mutex);
         bufferevent_free(bev);
+		pthread_mutex_unlock(&mutex);
     }
 
     /*+----------------------+
@@ -77,7 +83,6 @@ void do_parser_frames(wss_session_t *session)
         closing = CLOSE_UNEXPECTED;
     }
 
-	//验证解析的帧，检查帧的完整性和有效性,如果数据不完整或帧无效，设置关闭原因 
     if( !wss_validate_frame(frame, &closing) )
     {
         log_error("Invalid frame detected: %s\n", wss_closing_string(closing));
@@ -95,8 +100,6 @@ void do_parser_frames(wss_session_t *session)
      *|  Reply for the frame |
      *+----------------------+*/
 
-	/*构建响应帧*/
-	//关闭帧
     if( closing )
     {
         bytes = wss_create_close_frame(frame_buf, sizeof(frame_buf), closing);
@@ -104,7 +107,6 @@ void do_parser_frames(wss_session_t *session)
     }
     else
     {
-    	//帧有有效负载, 构建文本帧作为回复
         if( frame->payload > 0 )
         {
             bytes = wss_create_frame(TEXT_FRAME, frame->payload, frame->payloadLength, frame_buf, sizeof(frame_buf));
@@ -119,14 +121,23 @@ void do_parser_frames(wss_session_t *session)
     wss_free_frame(frame);
 
     log_info("Sending frames to client\n");
-    bufferevent_write(bev, frame_buf, bytes);
+    
+	pthread_mutex_lock(&mutex);
+
+	bufferevent_write(bev, frame_buf, bytes);
 
     if( closing )//如果是关闭帧，等待一段时间后关闭 bufferevent 连接
     {
+		pthread_mutex_unlock(&mutex);
+
         usleep(10000);
         log_trace("Closing connection, since closing frame has been sent\n");
+		pthread_mutex_lock(&mutex);
         bufferevent_free(bev);
+		free(session);
     }
+
+	pthread_mutex_unlock(&mutex);
 
     return ;
 }
@@ -503,19 +514,41 @@ static void unmask(wss_frame_t *frame)
     }
 }
 
-void send_ping_frame(struct bufferevent *bev)
+void send_ping_frame(wss_session_t *session)
 {
-    char frame_buf[10]; 
-    int frame_size;
+    char 					frame_buf[10]; 
+    int 					frame_size;
+	char					msg[6] = "hello";
+	unsigned char 			*data;
+	struct evbuffer 		*output;
+    struct bufferevent 		*bev = session->bev;
 
-    frame_size = wss_create_frame(PING_FRAME, NULL, 0, frame_buf, sizeof(frame_buf));
+	output = bufferevent_get_output(bev);
+
+    frame_size = wss_create_frame(PING_FRAME, msg, 6, frame_buf, sizeof(frame_buf));
     if (frame_size > 0)
 	{
-        if (bufferevent_write(bev, frame_buf, frame_size) < 0)
-		{
-            log_error("Error writing ping frame to bufferevent: %s\n", strerror(errno));
+		evbuffer_add(output, frame_buf, frame_size);
+		data = evbuffer_pullup(output, frame_size);
+
+		if (data)
+        {
+            if (write(bufferevent_getfd(bev), data, frame_size) < 0)
+            {
+                log_error("Error writing ping frame to socket: %s\n", strerror(errno));
+            }
+            else
+            {
+                log_info("Ping frame sent: %s\n", frame_buf);
+            }
+
+            evbuffer_drain(output, frame_size);
+		}
+		else
+        {
+            log_error("Failed to pullup data from buffer\n");
         }
-    } 
+	}
 	else
 	{
         log_error("Failed to create ping frame\n");

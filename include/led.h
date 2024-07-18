@@ -15,6 +15,9 @@
 #define _LED_H_
 
 
+#include <gpiod.h>
+
+
 enum
 {
     LED_R,
@@ -40,8 +43,9 @@ typedef struct led_gpio_s
 } led_gpio_t;
 
 
-extern void init_gpio();
+extern void init_gpio(struct gpiod_chip *chip);
+extern void close_gpio(struct gpiod_chip *chip);
 extern void parse_led_data(const char *payload, size_t length);
-
+extern void turn_led(int which, int status);
 
 #endif

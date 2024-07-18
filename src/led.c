@@ -30,35 +30,47 @@ led_gpio_t  leds[LED_MAX] =
 };
 
 
-void init_gpio() {
-    const char *chipname = "gpiochip0";
-    struct gpiod_chip *chip;
-    int i;
+void init_gpio(struct gpiod_chip *chip)
+{
+	const char *chipname = "gpiochip0";
+	int i;
 
-    chip = gpiod_chip_open_by_name(chipname);
-    if (!chip) 
+	chip = gpiod_chip_open_by_name(chipname);
+	if (!chip) 
 	{
-        printf("gpiod open '%s' failed: %s\n", chipname, strerror(errno));
-        return;
-    }
+		printf("gpiod open '%s' failed: %s\n", chipname, strerror(errno));
+		return;
+	}
 
-    for (i = 0; i < LED_MAX; i++) 
+	for (i = 0; i < LED_MAX; i++) 
 	{
-        leds[i].line = gpiod_chip_get_line(chip, leds[i].gpio);
-        gpiod_line_request_output(leds[i].line, "rgbled", 0);
-    }
+		leds[i].line = gpiod_chip_get_line(chip, leds[i].gpio);
+		gpiod_line_request_output(leds[i].line, "rgbled", 0);
+	}
 }
 
+
+void close_gpio(struct gpiod_chip *chip)
+{	
+	int i;
+
+	for(i=0; i<LED_MAX; i++)
+	{
+		gpiod_line_release(leds[i].line);
+	}
+
+	gpiod_chip_close(chip);
+}
+
+
 void turn_led(int which, int status) {
-    if (which < 0 || which >= LED_MAX)
-        return;
+	if (which < 0 || which >= LED_MAX)
+		return;
 
-    log_info("turn %5s led GPIO#%d %s\n", leds[which].desc, leds[which].gpio, status ? "ON" : "OFF");
+	log_info("turn %5s led GPIO#%d %s\n", leds[which].desc, leds[which].gpio, status ? "ON" : "OFF");
 
-    gpiod_line_set_value(leds[which].line, status);
+	gpiod_line_set_value(leds[which].line, status);
 
-
-    printf("turn led complete\n");
 }
 
 
@@ -84,18 +96,18 @@ static int parse_led_id(const char *ledId)
 
 
 static int parse_led_status(const char *status) {
-    if (strcmp(status, "on") == 0) 
+	if (strcmp(status, "on") == 0) 
 	{
-        return ON;
-    } 
+		return ON;
+	} 
 	else if (strcmp(status, "off") == 0) 
 	{
-        return OFF;
-    } 
+		return OFF;
+	} 
 	else 
 	{
-        return -1;  // 无效的状态
-    }
+		return -1;  // 无效的状态
+	}
 }
 
 
@@ -120,23 +132,23 @@ void parse_led_data(const char *payload, size_t length)
 	}
 
 	int led_id = parse_led_id(led_id_json->valuestring);
-    int status = parse_led_status(status_json->valuestring);
+	int status = parse_led_status(status_json->valuestring);
 
-    if (led_id >= 0 && led_id < LED_MAX && status >= 0)
-    {
-        turn_led(led_id, status);
-    }
-    else
-    {
-        if (led_id < 0 || led_id >= LED_MAX)
-        {
-            log_error("Invalid LED ID: %s\n", led_id_json->valuestring);
-        }
-        if (status < 0)
-        {
-            log_error("Invalid LED status: %s\n", status_json->valuestring);
-        }
-    }
+	if (led_id >= 0 && led_id < LED_MAX && status >= 0)
+	{
+		turn_led(led_id, status);
+	}
+	else
+	{
+		if (led_id < 0 || led_id >= LED_MAX)
+		{
+			log_error("Invalid LED ID: %s\n", led_id_json->valuestring);
+		}
+		if (status < 0)
+		{
+			log_error("Invalid LED status: %s\n", status_json->valuestring);
+		}
+	}
 
 	cJSON_Delete(root);
 }
