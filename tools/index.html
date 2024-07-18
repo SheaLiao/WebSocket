@@ -23,15 +23,25 @@
 
         h1, h2 {
             margin-bottom: 20px;
-        }
+		}
 
-        canvas {
+
+		canvas {
             max-width: 35%;
-            max-height: 55%;
+            max-height: 45%;
             margin-bottom: 10px;
             border: 2px solid #000;
             padding: 10px;
         }
+
+        #currentValues {
+			border: 2px solid #000;
+            padding: 10px;
+            border-radius: 5px;
+			width: fit-content;
+			margin-bottom: 30px;
+		}
+
 
         #ledContainer {
             display: flex;
@@ -44,26 +54,24 @@
             height: 60px;
             border-radius: 50%;
             border: none;
-            font-size: 16px;
-            color: white;
+            background-size: cover; /* 新增样式，使背景图片铺满按钮 */
             cursor: pointer;
-            transition: background-color 0.3s;
         }
 
         .ledButton.off {
-            background-color: gray;
+            background-image: url('https://s3.bmp.ovh/imgs/2024/07/18/2ea1591b085714f9.png');
         }
 
         .ledButton.on-red {
-            background-color: red;
+            background-image: url('https://s3.bmp.ovh/imgs/2024/07/18/cde8b6f2e33c3059.png'); 
         }
 
         .ledButton.on-green {
-            background-color: green;
+            background-image: url('https://s3.bmp.ovh/imgs/2024/07/18/d846f6a5e934e6a5.png'); 
         }
 
         .ledButton.on-blue {
-            background-color: blue;
+            background-image: url('https://s3.bmp.ovh/imgs/2024/07/18/6a9d0c2d0d938569.png');
         }
 
         .message {
@@ -83,13 +91,18 @@
     </style>
 </head>
 <body>
-    <h1>Temperature and Humidity</h1>
-    <canvas id="temperatureHumidityChart"></canvas>
-    <h2>LED Control</h2>
+	<h1>温湿度</h1>
+	<canvas id="temperatureHumidityChart"></canvas>
+	<div id="currentValues">
+		<p>当前湿度: <span id="currentHumidity"></span></p>
+	    <p>当前温度: <span id="currentTemperature"></span></p>
+	</div>
+	<h1></h1>
+	<h2>LED灯</h2>
     <div id="ledContainer">
-        <button id="LED_R" class="ledButton off" onclick="toggleLight('LED_R')">OFF</button>
-        <button id="LED_G" class="ledButton off" onclick="toggleLight('LED_G')">OFF</button>
-        <button id="LED_B" class="ledButton off" onclick="toggleLight('LED_B')">OFF</button>
+        <button id="LED_R" class="ledButton off" onclick="toggleLight('LED_R')"></button>
+        <button id="LED_G" class="ledButton off" onclick="toggleLight('LED_G')"></button>
+        <button id="LED_B" class="ledButton off" onclick="toggleLight('LED_B')"></button>
     </div>
     <div id="message" class="message">提示信息</div>
 
@@ -140,9 +153,9 @@
                 'LED_B': 'blue'
             };
 
-			let url="ws://" + location.host;
-			const socket = new WebSocket(url);
-			socket.onopen = function() {
+            let url="ws://" + location.host;
+            const socket = new WebSocket(url);
+            socket.onopen = function() {
                 console.log('WebSocket connection established');
             };
             socket.onerror = function(error) {
@@ -150,8 +163,8 @@
             };
 
             socket.onmessage = function(event) {
-				console.log('Received message from server:', event.data);
-				const message = JSON.parse(event.data);
+                console.log('Received message from server:', event.data);
+                const message = JSON.parse(event.data);
                 console.log(message);
 
                 if (message.temperature && message.humidity) {
@@ -166,18 +179,18 @@
                         temperatureHumidityData.datasets[1].data.shift();
                     }
 
-                    temperatureHumidityChart.update();
+					document.getElementById('currentTemperature').textContent = `${message.temperature.value.toFixed(2)} °C`;
+                	document.getElementById('currentHumidity').textContent = `${message.humidity.value.toFixed(2)} %`;
+					temperatureHumidityChart.update();
                 } else if (message.type === 'ledStatus') {
                     const led = document.getElementById(`LED_${message.ledId}`);
                     const color = ledColors[`LED_${message.ledId}`];
                     if (message.status === 'on') {
                         led.classList.remove('off');
                         led.classList.add(`on-${color}`);
-                        led.textContent = 'ON';
                     } else {
                         led.classList.remove(`on-${color}`);
                         led.classList.add('off');
-                        led.textContent = 'OFF';
                     }
                 }
             };
@@ -192,20 +205,18 @@
                 if (led.classList.contains('off')) {
                     led.classList.remove('off');
                     led.classList.add(`on-${color}`);
-                    led.textContent = 'ON';
                     action = '打开';
                     status = 'on';
                 } else {
                     led.classList.remove(`on-${color}`);
                     led.classList.add('off');
-                    led.textContent = 'OFF';
                     action = '关闭';
                     status = 'off';
                 }
 
                 // 显示提示信息
-                messageElement.textContent = `${action} LED${ledId.charAt(ledId.length - 1)}`;
-                messageElement.style.display = 'block';
+				messageElement.textContent = `${action === '打开' ? '打开' : '关闭'} ${color.toUpperCase()}灯`;
+				messageElement.style.display = 'block';
 
                 // 3秒后隐藏提示信息
                 setTimeout(function() {
@@ -223,6 +234,4 @@
     </script>
 </body>
 </html>
-
-
 
