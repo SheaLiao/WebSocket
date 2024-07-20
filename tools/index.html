@@ -100,10 +100,19 @@
 	<h1></h1>
 	<h2>LED灯</h2>
     <div id="ledContainer">
-        <button id="LED_R" class="ledButton off" onclick="toggleLight('LED_R')"></button>
-        <button id="LED_G" class="ledButton off" onclick="toggleLight('LED_G')"></button>
-        <button id="LED_B" class="ledButton off" onclick="toggleLight('LED_B')"></button>
-    </div>
+		<div>
+            <button id="LED_R" class="ledButton off" onclick="toggleLight('LED_R')"></button>
+            <div class="ledLabel">红灯</div>
+        </div>
+        <div>
+            <button id="LED_G" class="ledButton off" onclick="toggleLight('LED_G')"></button>
+            <div class="ledLabel">绿灯</div>
+        </div>
+        <div>
+            <button id="LED_B" class="ledButton off" onclick="toggleLight('LED_B')"></button>
+            <div class="ledLabel">蓝灯</div>
+        </div>
+	</div>
     <div id="message" class="message">提示信息</div>
 
     <script type="text/javascript">
@@ -174,6 +183,12 @@
                     temperatureHumidityData.datasets[1].data.push({x: time, y: message.humidity.value});
 
                     if (temperatureHumidityData.labels.length > 50) {
+                        temperatureHumidityData.labels.shift();
+                        temperatureHumidityData.datasets[0].data.shift();
+                        temperatureHumidityData.datasets[1].data.shift();
+                    }
+
+					if (temperatureHumidityData.labels.length > 10) {
                         temperatureHumidityData.labels.shift();
                         temperatureHumidityData.datasets[0].data.shift();
                         temperatureHumidityData.datasets[1].data.shift();
