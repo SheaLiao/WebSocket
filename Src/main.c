@@ -21,10 +21,6 @@
 #include "tim.h"
 #include "usart.h"
 #include "gpio.h"
-#include "esp8266.h"
-
-#include <string.h>
-#include <stdio.h>
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -50,9 +46,9 @@
 
 /* USER CODE BEGIN PV */
 
-#define ROUTER		"LingYun_XiaoMi"
-#define PASSWORD	"lingyun_emb"
-#define SOCKIP		"192.168.10.254"
+#define ROUTER		"ROUTER"
+#define PASSWORD	"PASSWORD"
+#define SOCKIP		"xxx.xxx.xxx.xxx"
 #define	SOCKPORT	12345
 
 #define FLAG_WIFI_CONNECTED		(1<<0)
@@ -163,8 +159,8 @@ int main(void)
 
 	  if( time_after(HAL_GetTick(), last_time+3000) )
 	  {
-		  rv = esp8266_sock_send("hello", strlen("hello"));
-		  if( rv > 0 )
+		  rv = report_tempRH_json();
+		  if( rv == 0 )
 		  {
 			  printf("ESP8266 socket send message ok\n");
 		  }
@@ -238,6 +234,25 @@ void SystemClock_Config(void)
 }
 
 /* USER CODE BEGIN 4 */
+
+int report_tempRH_json(void)
+{
+	char buf[128],temp[20],humd[20];
+	float temperature,humidity;
+	int	rv;
+
+
+	SHT20_SampleData(0xF3,&temperature);
+	SHT20_SampleData(0xF5,&humidity);
+
+	memset(buf,0,sizeof(buf));
+	snprintf(buf,sizeof(buf),"{\"Temperature\":\"%.2f\",\"Humidity\":\"%.2f\"}",temperature,humidity);
+
+	rv = esp8266_sock_send((uint8_t *)buf, strlen(buf));
+
+	return rv>0 ? 0 : -2;
+}
+
 
 /* USER CODE END 4 */
 
