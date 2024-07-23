@@ -18,6 +18,7 @@
 #endif
 
 
+
 int send_atcmd(char *atcmd, char *expect_reply, unsigned int timeout)
 {
 	int				rv = 1;
@@ -61,7 +62,7 @@ CleanUp:
 
 
 
-int atcmd_send_data(unsigned char *data,int bytes , unsigned int timeout)
+int atcmd_send_data(unsigned char *data, int bytes , unsigned int timeout)
 {
 	int				rv = -1;
 	unsigned int	i;
@@ -274,40 +275,73 @@ int esp8266_ping_test(char *host)
 
 
 
-int esp8266_sock_connect(char *servip, int port)
+int esp8266_connect_wifi(void)
 {
-	char		atcmd[128] = {0x00};
+    char ipaddr[16];
+    char gateway[16];
+    int status = 0;
 
-	if( !servip || port<=0 )
-	{
-		dbg_print("ERROR: Invalid input arguments\r\n");
-		return -1;
-	}
+    // 初始化ESP8266模块
+    if (esp8266_module_init() != 0)
+    {
+    	dbg_print("ESP8266 init failure\r\n");
+        return -1;
+    }
 
-	send_atcmd("AT+CIPMUX=0\r\n", EXPECT_OK, 1500);
+    // 连接到指定的WiFi网络
+    if (esp8266_join_network(ROUTER, PASSWORD) != 0)
+    {
+    	dbg_print("join WiFi failure\r\n");
+        return -1;
+    }
 
-	snprintf(atcmd, sizeof(atcmd), "AT+CIPSTART=\"TCP\",\"%s\",%d\r\n", servip, port);
-	if( send_atcmd(atcmd, "CONNECT\r\n", 1000) )
-	{
-		dbg_print("ERROR: ESP8266 connect to [%s:%d] failure\r\n", servip, port);
-		return -2 ;
-	}
+    // 获取IP地址和网关
+    if (esp8266_get_ipaddr(ipaddr, gateway, sizeof(ipaddr)) != 0)
+    {
+    	dbg_print("get IP failure\r\n");
+        return -1;
+    }
+    printf("connect successfully，IP: %s, gateway: %s\r\n", ipaddr, gateway);
 
-	dbg_print("INFO: ESP8266 connect to [%s:%d] ok\r\n", servip, port);
-	return 0;
+    // Ping测试
+    if (esp8266_ping_test("192.168.10.104") != 0)
+    {
+    	dbg_print("Ping failure\r\n");
+        return -1;
+    }
+
+    // 设置成功标志
+    status |= FLAG_WIFI_CONNECTED;
+    dbg_print("WiFi connect successfully\r\n");
+
+    return status;
 }
 
 
 
-int esp8266_sock_disconnect(void)
+int esp8266_setup_server(int port)
 {
-	send_atcmd("AT+CIPCLOSE\r\n", EXPECT_OK, 1500);
+    char atcmd[128] = {0x00};
+
+    if (send_atcmd("AT+CIPMUX=1\r\n", "OK", 1500))
+    {
+    	dbg_print("ERROR: Set ESP8266 to multi-connection mode failed\r\n");
+        return -1;
+    }
+
+	snprintf(atcmd, sizeof(atcmd), "AT+CIPSERVER=1,%d\r\n", port);
+	if (send_atcmd(atcmd, "OK", 1500))
+	{
+		dbg_print("ERROR: Start ESP8266 server failed\r\n");
+		return -2;
+	}
+
+	dbg_print("INFO: ESP8266 server started on port %d\r\n", port);
 	return 0;
 }
 
 
-
-int esp8266_sock_send(unsigned char *data, int bytes)
+int esp8266_sock_send(unsigned char *data, int id, int bytes)
 {
 	char		atcmd[128] = {0x00};
 
@@ -317,8 +351,8 @@ int esp8266_sock_send(unsigned char *data, int bytes)
 		return -1;
 	}
 
-	snprintf(atcmd, sizeof(atcmd), "AT+CIPSEND=%d\r\n", bytes);
-	if( send_atcmd(atcmd, ">", 500) )
+	snprintf(atcmd, sizeof(atcmd), "AT+CIPSEND=%d,%d\r\n", id, bytes);
+	if( send_atcmd(atcmd, ">", 3000) )
 	{
 		dbg_print("ERROR: AT+CIPSEND command failure\r\n");
 		return -2 ;
@@ -334,63 +368,45 @@ int esp8266_sock_send(unsigned char *data, int bytes)
 }
 
 
-int esp8266_sock_recv(unsigned char *buf, int size)
+int check_client_connection(int *link_id)
 {
-	char		*data = NULL;
-	char		*ptr = NULL;
+    int client_connected = 0;
 
-	int			len;
-	int			rv;
-	int			bytes;
+    printf("buf: %s\r\n", g_uart2_rxbuf);
+    if (g_uart2_bytes > 0)
+    {
+        // 使用 strstr 检查是否有新连接的指示消息
+        char *connect_str = strstr(g_uart2_rxbuf, ",CONNECT");
+        if (connect_str != NULL)
+        {
+            // 获取连接ID
+            char *id_str = strtok(g_uart2_rxbuf, ",");
+            if (id_str != NULL)
+            {
+                *link_id = atoi(id_str);
+                printf("Client connected on link %d\r\n", *link_id);
+                client_connected = 1; // 设置标志位，表示有新连接
+            }
+        }
+        else
+        {
+            printf("No new connection found\r\n");
+        }
+    }
+    else
+    {
+        printf("No data in buffer\r\n");
+    }
 
-	if( !buf || size<=0 )
-	{
-		dbg_print("ERROR: Invalid input arguments\r\n");
-		return -1;
-	}
+    // 如果检测到新连接，则清空缓冲区
+    if (client_connected)
+    {
+        g_uart2_bytes = 0; // 重置缓冲区计数器
+        memset(g_uart2_rxbuf, 0, sizeof(g_uart2_rxbuf)); // 清空缓冲区内容
+    }
 
-	if( g_wifi_rxbuf <= 0 )
-	{
-		return 0;
-	}
-
-	if( !(ptr=strstr(g_wifi_rxbuf, "+IPD,")) || !(data=strchr(g_wifi_rxbuf, ':')) )
-	{
-		return 0;
-	}
-
-	data++;
-	bytes = atoi(ptr+strlen("+IPD,"));
-
-	len = g_wifi_rxbytes - (data-g_uart2_rxbuf);
-
-	if( len <bytes )
-	{
-		dbg_print("+IPD data not receive over, receive again later ...\r\n");
-		return 0;
-	}
-
-	memset(buf, 0, size);
-	rv = bytes>size ? size : bytes;
-	memcpy(buf, data, rv);
-
-	clear_atcmd_buf();
-
-	return rv;
+    return client_connected; // 返回连接状态
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 

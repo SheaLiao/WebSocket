@@ -25,6 +25,15 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 
+#include "esp8266.h"
+#include "sht20.h"
+#include "core_json.h"
+#include "wss.h"
+#include "index_html.h"
+
+#include <string.h>
+#include <stdio.h>
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -46,13 +55,9 @@
 
 /* USER CODE BEGIN PV */
 
-#define ROUTER		"ROUTER"
-#define PASSWORD	"PASSWORD"
-#define SOCKIP		"xxx.xxx.xxx.xxx"
-#define	SOCKPORT	12345
-
-#define FLAG_WIFI_CONNECTED		(1<<0)
-#define FLAG_SOCK_CONNECTED		(1<<1)
+#define	PORT			12345
+#define JSON_BUF_SIZE 	128
+int 					client_link_id = -1;
 
 /* USER CODE END PV */
 
@@ -65,6 +70,8 @@ void SystemClock_Config(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
+static int report_tempRH_json(void);
+
 /* USER CODE END 0 */
 
 /**
@@ -75,12 +82,11 @@ int main(void)
 {
   /* USER CODE BEGIN 1 */
 
-	uint32_t		last_time = 0;
-	unsigned char	buf[256];
-	int				rv;
-	char			ipaddr[16];
-	char			gateway[16];
-	unsigned char	wifi_flag = 0;
+	int			wifi_status = 0;
+	int			server_status = -1;
+	uint32_t 	last_send_time = 0;
+	uint32_t 	send_interval = 5000; // 发�?�间隔，单位为毫�?
+
 
   /* USER CODE END 1 */
 
@@ -102,9 +108,9 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
-  MX_USART1_UART_Init();
   MX_USART2_UART_Init();
   MX_TIM6_Init();
+  MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
 
   /* USER CODE END 2 */
@@ -112,76 +118,73 @@ int main(void)
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
 
-  esp8266_module_init();
 
 
   while (1)
   {
-	  if( !(wifi_flag&FLAG_WIFI_CONNECTED) )
+	  printf("Current wifi_status: %d, server_status: %d\r\n", wifi_status, server_status);
+	  if (!(wifi_status & FLAG_WIFI_CONNECTED))
 	  {
-		  if( esp8266_join_network(ROUTER,PASSWORD) )
+		  wifi_status = esp8266_connect_wifi();
+		  if (wifi_status & FLAG_WIFI_CONNECTED)
 		  {
-			  esp8266_module_init();
-			  HAL_Delay(2000);
-			  continue;
-		  }
+			  printf("ESP8266 connect WiFi successfully\r\n");
 
-		  if( esp8266_get_ipaddr(ipaddr, gateway, sizeof(ipaddr)) )
-		  {
-			  HAL_Delay(1000);
-			  continue;
-		  }
-
-		  if( esp8266_ping_test(gateway) )
-		  {
-			  HAL_Delay(1000);
-			  continue;
-		  }
-
-		  wifi_flag |= FLAG_WIFI_CONNECTED;
-	  }
-
-	  if( !(wifi_flag&FLAG_SOCK_CONNECTED) )
-	  {
-		  if( esp8266_sock_connect(SOCKIP, SOCKPORT) )
-		  {
-			  HAL_Delay(1000);
-			  continue;
-		  }
-		  wifi_flag |= FLAG_SOCK_CONNECTED;
-	  }
-
-
-	  if( (rv=esp8266_sock_recv(buf, sizeof(buf))) > 0 )
-	  {
-		  printf("ESP8266 socket receive %d bytes data: %s\n", rv, buf);
-	  }
-
-	  if( time_after(HAL_GetTick(), last_time+3000) )
-	  {
-		  rv = report_tempRH_json();
-		  if( rv == 0 )
-		  {
-			  printf("ESP8266 socket send message ok\n");
+			  server_status = esp8266_setup_server(PORT);
+			  if (server_status == 0)
+			  {
+				  printf("ESP8266 server setup on port %d successfully\r\n", PORT);
+				  wifi_status |= FLAG_SOCK_CONNECTED;
+			  }
+			  else
+			  {
+				  printf("ESP8266 server setup on port %d failed\r\n", PORT);
+			  }
 		  }
 		  else
 		  {
-			  printf("ESP8266 socket send message failure, rv=%d\n", rv);
-			  wifi_flag &= ~FLAG_SOCK_CONNECTED;
-
-			  if( esp8266_ping_test(gateway) )
-			  {
-				  wifi_flag &= ~FLAG_WIFI_CONNECTED;
-			  }
+			  printf("ESP8266 connect WiFi failure\r\n");
 		  }
-
-		  last_time = HAL_GetTick();
 	  }
 
+
+	  // �?查是否有新的客户端连�?
+	  if (wifi_status & FLAG_SOCK_CONNECTED && check_client_connection(&client_link_id))
+	  {
+		  wifi_status |= FLAG_CLIENT_CONNECTED;
+		  printf("connect successfully on link %d\r\n", client_link_id);
+	  }
+	  else
+	  {
+		  printf("No client connected\r\n");
+	  }
+
+	  // 在检测到客户端连接后定时发�?�数�?
+	  if (wifi_status & FLAG_CLIENT_CONNECTED)
+	  {
+		  uint32_t current_time = HAL_GetTick();
+		  if (current_time - last_send_time >= send_interval)
+		  {
+			  // 发�?�温湿度数据
+			  if (report_tempRH_json() == 0)
+			  {
+				  printf("Temperature and humidity data sent successfully\r\n");
+			  }
+			  else
+			  {
+				  printf("Failed to send temperature and humidity data\r\n");
+			  }
+			  last_send_time = current_time; // 更新上次发�?�时�?
+		  }
+	  }
+
+	  HAL_Delay(300);
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
   }
+
+
   /* USER CODE END 3 */
 }
 
@@ -235,22 +238,75 @@ void SystemClock_Config(void)
 
 /* USER CODE BEGIN 4 */
 
+
+int send_html_page(int client_link_id)
+{
+    int html_length = strlen(g_index_html);
+    char send_cmd[128];
+
+    // 生成 AT+CIPSEND 命令
+    snprintf(send_cmd, sizeof(send_cmd), "AT+CIPSEND=%d,%d\r\n", client_link_id, html_length);
+
+    // 发�?? AT+CIPSEND 命令
+    if (send_atcmd(send_cmd, ">", 500) == 0)
+    {
+        // 发�?? HTML 数据
+        if (send_atcmd(g_index_html, "SEND OK", 500) == 0)
+        {
+            return 0; // 发�?�成�?
+        }
+        else
+        {
+            dbg_print("ERROR: HTML data send failure\r\n");
+            return -2; // 数据发�?�失�?
+        }
+    }
+    else
+    {
+        dbg_print("ERROR: AT+CIPSEND command failure\r\n");
+        return -1; // AT+CIPSEND 命令失败
+    }
+}
+
+
+
 int report_tempRH_json(void)
 {
-	char buf[128],temp[20],humd[20];
-	float temperature,humidity;
-	int	rv;
+    char buf[JSON_BUF_SIZE];
+    float temperature, humidity;
+    int rv;
 
+    // 获取温度和湿度数�?
+    SHT20_SampleData(0xF3, &temperature);
+    SHT20_SampleData(0xF5, &humidity);
 
-	SHT20_SampleData(0xF3,&temperature);
-	SHT20_SampleData(0xF5,&humidity);
+    // 生成 JSON 消息
+    memset(buf, 0, sizeof(buf));
+    snprintf(buf, sizeof(buf), "{\"Temperature\":\"%.2f\",\"Humidity\":\"%.2f\"}", temperature, humidity);
 
-	memset(buf,0,sizeof(buf));
-	snprintf(buf,sizeof(buf),"{\"Temperature\":\"%.2f\",\"Humidity\":\"%.2f\"}",temperature,humidity);
+    // 发�?? JSON 消息
+    char send_cmd[128];
+    snprintf(send_cmd, sizeof(send_cmd), "AT+CIPSEND=%d,%d\r\n", client_link_id, strlen(buf));
 
-	rv = esp8266_sock_send((uint8_t *)buf, strlen(buf));
+    // 发�?? AT+CIPSEND 命令
+    if (send_atcmd(send_cmd, ">", 500) == 0)
+    {
+        // 发�?? JSON 数据
+        if (send_atcmd(buf, "SEND OK", 500) == 0)
+        {
+            rv = 0; // 发�?�成�?
+        }
+        else
+        {
+            rv = -1; // 数据发�?�失�?
+        }
+    }
+    else
+    {
+        rv = -1; // AT+CIPSEND 命令失败
+    }
 
-	return rv>0 ? 0 : -2;
+    return rv;
 }
 
 

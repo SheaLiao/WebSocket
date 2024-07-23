@@ -30,6 +30,7 @@ static uint8_t s_uart2_rxch;
 char g_uart2_rxbuf[256];
 uint8_t g_uart2_bytes;
 
+
 /* USER CODE END 0 */
 
 UART_HandleTypeDef huart1;
@@ -63,7 +64,6 @@ void MX_USART1_UART_Init(void)
   }
   /* USER CODE BEGIN USART1_Init 2 */
 
-  //使能usart1的中断，中断接收的每个字节存储在s_uart1_rxch�?
   HAL_UART_Receive_IT(&huart1,&s_uart1_rxch,1);
 
   /* USER CODE END USART1_Init 2 */
@@ -252,31 +252,17 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 	}
 
 	if(huart->Instance == USART2)
+	{
+		if(g_uart2_bytes < sizeof(g_uart2_rxbuf))//防止溢出
 		{
-			if(g_uart2_bytes < sizeof(g_uart2_rxbuf))//防止溢出
-			{
-				g_uart2_rxbuf[g_uart2_bytes++] = s_uart2_rxch;
-			}
-			HAL_UART_Receive_IT(&huart2,&s_uart2_rxch,1);
+			g_uart2_rxbuf[g_uart2_bytes++] = s_uart2_rxch;
 		}
-}
-
-
-void uart_forward(void)
-{
-	if( strstr(g_uart1_rxbuf, "\r\n"))
-	{
-		HAL_UART_Transmit(&huart2, (uint8_t *)g_uart1_rxbuf, g_uart1_bytes, 0xFF);
-		clear_uart1_rxbuf();
-	}
-
-	if( g_uart2_bytes > 0 )
-	{
-		HAL_Delay(100);
-		HAL_UART_Transmit(&huart1, (uint8_t *)g_uart2_rxbuf, g_uart2_bytes, 0xFF);
-		clear_uart2_rxbuf();
+		HAL_UART_Receive_IT(&huart2,&s_uart2_rxch,1);
 	}
 }
+
+
+
 
 
 
