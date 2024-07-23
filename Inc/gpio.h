@@ -42,12 +42,6 @@ void MX_GPIO_Init(void);
 
 enum
 {
-	Relay,
-	RelayMax,
-};
-
-enum
-{
 	RedLed,
 	GreenLed,
 	BlueLed,
@@ -63,6 +57,8 @@ typedef struct gpio_s
 	GPIO_TypeDef *group;
 	uint16_t pin;
 }gpio_t;
+
+extern gpio_t leds[LedMax];
 
 extern void turn_led(int which,int status);
 

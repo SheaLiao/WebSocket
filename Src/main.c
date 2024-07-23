@@ -85,7 +85,7 @@ int main(void)
 	int			wifi_status = 0;
 	int			server_status = -1;
 	uint32_t 	last_send_time = 0;
-	uint32_t 	send_interval = 5000; // 发�?�间隔，单位为毫�?
+	uint32_t 	send_interval = 5000; // 发�?�间隔，单位为毫�?
 
 
   /* USER CODE END 1 */
@@ -148,7 +148,6 @@ int main(void)
 	  }
 
 
-	  // �?查是否有新的客户端连�?
 	  if (wifi_status & FLAG_SOCK_CONNECTED && check_client_connection(&client_link_id))
 	  {
 		  wifi_status |= FLAG_CLIENT_CONNECTED;
@@ -159,13 +158,11 @@ int main(void)
 		  printf("No client connected\r\n");
 	  }
 
-	  // 在检测到客户端连接后定时发�?�数�?
 	  if (wifi_status & FLAG_CLIENT_CONNECTED)
 	  {
 		  uint32_t current_time = HAL_GetTick();
 		  if (current_time - last_send_time >= send_interval)
 		  {
-			  // 发�?�温湿度数据
 			  if (report_tempRH_json() == 0)
 			  {
 				  printf("Temperature and humidity data sent successfully\r\n");
@@ -174,7 +171,13 @@ int main(void)
 			  {
 				  printf("Failed to send temperature and humidity data\r\n");
 			  }
-			  last_send_time = current_time; // 更新上次发�?�时�?
+			  last_send_time = current_time; // 更新上次发�?�时�?
+		  }
+
+
+		  if(0 != parser_led_json(g_uart2_rxbuf,g_uart2_bytes))
+		  {
+					clear_uart2_rxbuf();
 		  }
 	  }
 
@@ -239,34 +242,31 @@ void SystemClock_Config(void)
 /* USER CODE BEGIN 4 */
 
 
-int send_html_page(int client_link_id)
-{
-    int html_length = strlen(g_index_html);
-    char send_cmd[128];
-
-    // 生成 AT+CIPSEND 命令
-    snprintf(send_cmd, sizeof(send_cmd), "AT+CIPSEND=%d,%d\r\n", client_link_id, html_length);
-
-    // 发�?? AT+CIPSEND 命令
-    if (send_atcmd(send_cmd, ">", 500) == 0)
-    {
-        // 发�?? HTML 数据
-        if (send_atcmd(g_index_html, "SEND OK", 500) == 0)
-        {
-            return 0; // 发�?�成�?
-        }
-        else
-        {
-            dbg_print("ERROR: HTML data send failure\r\n");
-            return -2; // 数据发�?�失�?
-        }
-    }
-    else
-    {
-        dbg_print("ERROR: AT+CIPSEND command failure\r\n");
-        return -1; // AT+CIPSEND 命令失败
-    }
-}
+//int send_html_page(int client_link_id)
+//{
+//    int html_length = strlen(g_index_html);
+//    char send_cmd[128];
+//
+//    snprintf(send_cmd, sizeof(send_cmd), "AT+CIPSEND=%d,%d\r\n", client_link_id, html_length);
+//
+//    if (send_atcmd(send_cmd, ">", 500) == 0)
+//    {
+//        if (send_atcmd(g_index_html, "SEND OK", 500) == 0)
+//        {
+//            return 0;
+//        }
+//        else
+//        {
+//            dbg_print("ERROR: HTML data send failure\r\n");
+//            return -2;
+//        }
+//    }
+//    else
+//    {
+//        dbg_print("ERROR: AT+CIPSEND command failure\r\n");
+//        return -1; // AT+CIPSEND 命令失败
+//    }
+//}
 
 
 
@@ -276,38 +276,109 @@ int report_tempRH_json(void)
     float temperature, humidity;
     int rv;
 
-    // 获取温度和湿度数�?
     SHT20_SampleData(0xF3, &temperature);
     SHT20_SampleData(0xF5, &humidity);
 
-    // 生成 JSON 消息
     memset(buf, 0, sizeof(buf));
     snprintf(buf, sizeof(buf), "{\"Temperature\":\"%.2f\",\"Humidity\":\"%.2f\"}", temperature, humidity);
 
-    // 发�?? JSON 消息
     char send_cmd[128];
     snprintf(send_cmd, sizeof(send_cmd), "AT+CIPSEND=%d,%d\r\n", client_link_id, strlen(buf));
 
-    // 发�?? AT+CIPSEND 命令
     if (send_atcmd(send_cmd, ">", 500) == 0)
     {
-        // 发�?? JSON 数据
         if (send_atcmd(buf, "SEND OK", 500) == 0)
         {
-            rv = 0; // 发�?�成�?
+            rv = 0;
         }
         else
         {
-            rv = -1; // 数据发�?�失�?
+            rv = -1;
         }
     }
     else
     {
-        rv = -1; // AT+CIPSEND 命令失败
+        rv = -1;
     }
 
     return rv;
 }
+
+
+
+int parser_led_json(char *json_string, int bytes)
+{
+    JSONStatus_t result;
+    char *json_data;
+    size_t json_len;
+
+    json_data = strstr(json_string, "{");
+    if (json_data == NULL)
+    {
+        printf("ERROR: No JSON data found in string!\r\n");
+        return -1;
+    }
+
+    json_len = bytes - (json_data - json_string);
+
+    printf("DBUG: Extracted JSON string: %s\r\n", json_data);
+
+    result = JSON_Validate(json_data, json_len);
+
+    if (JSONPartial == result)
+    {
+        printf("WARN: JSON document is valid so far but incomplete!\r\n");
+        return 0;
+    }
+
+    if (JSONSuccess != result)
+    {
+        printf("ERROR: JSON document is not valid JSON!\r\n");
+        return -1;
+    }
+
+    for (int i = 0; i < LedMax; i++)
+    {
+        char *value;
+        size_t valen;
+
+        result = JSON_Search(json_data, json_len, leds[i].name, strlen(leds[i].name), &value, &valen);
+        if (JSONSuccess == result)
+        {
+            char save = value[valen];
+            value[valen] = '\0';
+
+            if (!strncasecmp(value, "on", 2))
+            {
+                printf("DBUG: turn %s on\r\n", leds[i].name);
+                turn_led(i, ON);
+            }
+            else if (!strncasecmp(value, "off", 3))
+            {
+                printf("DBUG: turn %s off\r\n", leds[i].name);
+                turn_led(i, OFF);
+            }
+
+            value[valen] = save;
+        }
+    }
+
+    return 1;
+}
+
+
+void proc_uart1_recv(void)
+{
+	if(g_uart2_bytes > 0)
+	{
+		HAL_Delay(200);
+		if(0 != parser_led_json(g_uart2_rxbuf,g_uart2_bytes))
+		{
+			clear_uart2_rxbuf();
+		}
+	}
+}
+
 
 
 /* USER CODE END 4 */
