@@ -30,6 +30,7 @@
 #include "core_json.h"
 #include "wss.h"
 #include "index_html.h"
+#include "ringbuf.h"
 
 #include <string.h>
 #include <stdio.h>
@@ -56,7 +57,7 @@
 /* USER CODE BEGIN PV */
 
 #define	PORT			12345
-#define JSON_BUF_SIZE 	128
+#define JSON_BUF_SIZE 	1028
 int 					client_link_id = -1;
 
 /* USER CODE END PV */
@@ -71,6 +72,7 @@ void SystemClock_Config(void);
 /* USER CODE BEGIN 0 */
 
 static int report_tempRH_json(void);
+static int parser_led_json(RingBuffer *rb);
 
 /* USER CODE END 0 */
 
@@ -85,8 +87,16 @@ int main(void)
 	int			wifi_status = 0;
 	int			server_status = -1;
 	uint32_t 	last_send_time = 0;
-	uint32_t 	send_interval = 5000; // 发�?�间隔，单位为毫�?
+	uint32_t 	send_interval = 5000;
 
+	wss_session_t *session;
+
+	if (!(session = malloc(sizeof(*session))))
+	{
+		printf("ERROR: Memory allocation for session failed\r\n");
+		return -1;
+	}
+	memset(session, 0, sizeof(*session));
 
   /* USER CODE END 1 */
 
@@ -122,7 +132,6 @@ int main(void)
 
   while (1)
   {
-	  printf("Current wifi_status: %d, server_status: %d\r\n", wifi_status, server_status);
 	  if (!(wifi_status & FLAG_WIFI_CONNECTED))
 	  {
 		  wifi_status = esp8266_connect_wifi();
@@ -148,37 +157,54 @@ int main(void)
 	  }
 
 
-	  if (wifi_status & FLAG_SOCK_CONNECTED && check_client_connection(&client_link_id))
-	  {
-		  wifi_status |= FLAG_CLIENT_CONNECTED;
-		  printf("connect successfully on link %d\r\n", client_link_id);
-	  }
-	  else
-	  {
-		  printf("No client connected\r\n");
-	  }
+      if (wifi_status & FLAG_SOCK_CONNECTED && client_link_id < 0)
+      {
+          int connection_status = check_client_connection(&client_link_id);
+          if (connection_status > 0)
+          {
+              wifi_status |= FLAG_CLIENT_CONNECTED;
+              printf("Client connected successfully on link %d\r\n", client_link_id);
+          }
+          else if (connection_status < 0)
+          {
+              printf("Client connection on link [%d] closed\r\n", client_link_id);
+              client_link_id = -1;
+          }
+      }
+
+      printf("client_link_id: %d\r\n");
 
 	  if (wifi_status & FLAG_CLIENT_CONNECTED)
 	  {
-		  uint32_t current_time = HAL_GetTick();
-		  if (current_time - last_send_time >= send_interval)
-		  {
-			  if (report_tempRH_json() == 0)
-			  {
-				  printf("Temperature and humidity data sent successfully\r\n");
-			  }
-			  else
-			  {
-				  printf("Failed to send temperature and humidity data\r\n");
-			  }
-			  last_send_time = current_time; // 更新上次发�?�时�?
-		  }
+		  if (!session->handshaked)
+		{
+			do_wss_handshake(&client_link_id, session);
+		}
+		else
+		{
+			uint32_t current_time = HAL_GetTick();
+			if (current_time - last_send_time >= send_interval)
+			{
+				if (report_tempRH_json() == 0)
+				{
+					printf("Temperature and humidity data sent successfully\r\n");
+				}
+				else
+				{
+					printf("Failed to send temperature and humidity data\r\n");
+				}
+				last_send_time = current_time;
+			}
 
-
-		  if(0 != parser_led_json(g_uart2_rxbuf,g_uart2_bytes))
-		  {
-					clear_uart2_rxbuf();
-		  }
+			if (g_uart2_ringbuf.count > 0)
+			{
+				if (parser_led_json(&g_uart2_ringbuf) != 0)
+				{
+					// 根据需要清空缓冲区
+					ring_buffer_init(&g_uart2_ringbuf);
+				}
+			}
+		}
 	  }
 
 	  HAL_Delay(300);
@@ -239,35 +265,6 @@ void SystemClock_Config(void)
   }
 }
 
-/* USER CODE BEGIN 4 */
-
-
-//int send_html_page(int client_link_id)
-//{
-//    int html_length = strlen(g_index_html);
-//    char send_cmd[128];
-//
-//    snprintf(send_cmd, sizeof(send_cmd), "AT+CIPSEND=%d,%d\r\n", client_link_id, html_length);
-//
-//    if (send_atcmd(send_cmd, ">", 500) == 0)
-//    {
-//        if (send_atcmd(g_index_html, "SEND OK", 500) == 0)
-//        {
-//            return 0;
-//        }
-//        else
-//        {
-//            dbg_print("ERROR: HTML data send failure\r\n");
-//            return -2;
-//        }
-//    }
-//    else
-//    {
-//        dbg_print("ERROR: AT+CIPSEND command failure\r\n");
-//        return -1; // AT+CIPSEND 命令失败
-//    }
-//}
-
 
 
 int report_tempRH_json(void)
@@ -282,44 +279,42 @@ int report_tempRH_json(void)
     memset(buf, 0, sizeof(buf));
     snprintf(buf, sizeof(buf), "{\"Temperature\":\"%.2f\",\"Humidity\":\"%.2f\"}", temperature, humidity);
 
-    char send_cmd[128];
-    snprintf(send_cmd, sizeof(send_cmd), "AT+CIPSEND=%d,%d\r\n", client_link_id, strlen(buf));
-
-    if (send_atcmd(send_cmd, ">", 500) == 0)
-    {
-        if (send_atcmd(buf, "SEND OK", 500) == 0)
-        {
-            rv = 0;
-        }
-        else
-        {
-            rv = -1;
-        }
-    }
-    else
-    {
-        rv = -1;
-    }
+    rv = esp8266_sock_send((unsigned char *)buf, client_link_id, strlen(buf));
 
     return rv;
 }
 
 
 
-int parser_led_json(char *json_string, int bytes)
+
+int parser_led_json(RingBuffer *rb)
 {
     JSONStatus_t result;
-    char *json_data;
-    size_t json_len;
+    char json_string[UART2_BUFFER_SIZE]; // 缓冲区大小要根据实际情况调整
+    size_t bytes_read = 0;
 
-    json_data = strstr(json_string, "{");
+    // 从环形缓冲区读取数据
+    while (ring_buffer_read(rb, (uint8_t *)&json_string[bytes_read]) == 0 && bytes_read < UART2_BUFFER_SIZE)
+    {
+        bytes_read++;
+    }
+
+    if (bytes_read == 0)
+    {
+        printf("ERROR: No data read from ring buffer!\r\n");
+        return -1;
+    }
+
+    json_string[bytes_read] = '\0'; // 确保字符串终止
+
+    char *json_data = strstr(json_string, "{");
     if (json_data == NULL)
     {
         printf("ERROR: No JSON data found in string!\r\n");
         return -1;
     }
 
-    json_len = bytes - (json_data - json_string);
+    size_t json_len = bytes_read - (json_data - json_string);
 
     printf("DBUG: Extracted JSON string: %s\r\n", json_data);
 
@@ -366,18 +361,6 @@ int parser_led_json(char *json_string, int bytes)
     return 1;
 }
 
-
-void proc_uart1_recv(void)
-{
-	if(g_uart2_bytes > 0)
-	{
-		HAL_Delay(200);
-		if(0 != parser_led_json(g_uart2_rxbuf,g_uart2_bytes))
-		{
-			clear_uart2_rxbuf();
-		}
-	}
-}
 
 
 

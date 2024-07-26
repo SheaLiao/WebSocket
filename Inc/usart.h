@@ -31,6 +31,8 @@ extern "C" {
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
 #include <string.h>
+
+#include "ringbuf.h"
 /* USER CODE END Includes */
 
 extern UART_HandleTypeDef huart1;
@@ -48,15 +50,14 @@ extern uint8_t 	g_uart1_bytes;
 								g_uart1_bytes=0;}while(0)
 
 
-
-extern char 	g_uart2_rxbuf[256];
+extern RingBuffer g_uart2_ringbuf;
+extern char 	g_uart2_rxbuf[4096];
 extern uint8_t 	g_uart2_bytes;
 
 #define clear_uart2_rxbuf() do {memset(g_uart2_rxbuf,0,sizeof(g_uart2_rxbuf));\
 								g_uart2_bytes=0;}while(0)
 
 
-void uart_forward(void);
 
 /* USER CODE END Private defines */
 

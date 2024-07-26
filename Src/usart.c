@@ -26,10 +26,11 @@ static uint8_t s_uart1_rxch;
 char g_uart1_rxbuf[256];
 uint8_t g_uart1_bytes;
 
-static uint8_t s_uart2_rxch;
-char g_uart2_rxbuf[256];
-uint8_t g_uart2_bytes;
 
+//char g_uart2_rxbuf[4096];
+//uint8_t g_uart2_bytes;
+RingBuffer g_uart2_ringbuf;
+static uint8_t s_uart2_rxch;
 
 /* USER CODE END 0 */
 
@@ -96,6 +97,8 @@ void MX_USART2_UART_Init(void)
     Error_Handler();
   }
   /* USER CODE BEGIN USART2_Init 2 */
+
+  ring_buffer_init(&g_uart2_ringbuf);
 
   HAL_UART_Receive_IT(&huart2,&s_uart2_rxch,1);
 
@@ -251,16 +254,25 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 		HAL_UART_Receive_IT(&huart1,&s_uart1_rxch,1);
 	}
 
-	if(huart->Instance == USART2)
+//	if(huart->Instance == USART2)
+//	{
+//		if(g_uart2_bytes < sizeof(g_uart2_rxbuf))
+//		{
+//			g_uart2_rxbuf[g_uart2_bytes++] = s_uart2_rxch;
+//		}
+//		HAL_UART_Receive_IT(&huart2,&s_uart2_rxch,1);
+//	}
+	if (huart->Instance == USART2)
 	{
-		if(g_uart2_bytes < sizeof(g_uart2_rxbuf))//防止溢出
-		{
-			g_uart2_rxbuf[g_uart2_bytes++] = s_uart2_rxch;
-		}
-		HAL_UART_Receive_IT(&huart2,&s_uart2_rxch,1);
+		ring_buffer_write(&g_uart2_ringbuf, s_uart2_rxch);  // 将数据写入环形缓冲区
+		HAL_UART_Receive_IT(&huart2, &s_uart2_rxch, 1);  // 重新启动接收中断
 	}
 }
 
+int uart2_ring_buffer_read(uint8_t *data)
+{
+    return ring_buffer_read(&g_uart2_ringbuf, data);  // 从环形缓冲区中读取数据
+}
 
 
 

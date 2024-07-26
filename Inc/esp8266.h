@@ -19,21 +19,14 @@
 #define FLAG_CLIENT_CONNECTED 	0x04
 
 
+
 #define wifi_huart		&huart2
-#define g_wifi_rxbuf	g_uart2_rxbuf
-#define g_wifi_rxbytes	g_uart2_bytes
 
 
-enum client_status
-{
-	CLIENT_CLOSED = 0,
-	CLIENT_CONNECT = 1,
-	CLIENT_UNKNOWN = -1
-};
+#define clear_atcmd_buf() do { \
+    ring_buffer_init(&g_uart2_ringbuf); \
+} while (0)
 
-
-#define clear_atcmd_buf()	do {memset(g_wifi_rxbuf,0,sizeof(g_wifi_rxbuf));\
-								g_wifi_rxbytes=0;} while(0)
 
 #define EXPECT_OK	"OK\r\n"
 
@@ -56,6 +49,8 @@ extern int esp8266_connect_wifi(void);
 extern int esp8266_setup_server(int port);
 
 extern int esp8266_sock_send(unsigned char *data, int id, int bytes);
+
+extern int esp8266_sock_recv(unsigned char *buf, int size);
 
 extern int check_client_connection(int *link_id);
 

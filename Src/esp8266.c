@@ -21,84 +21,125 @@
 
 int send_atcmd(char *atcmd, char *expect_reply, unsigned int timeout)
 {
-	int				rv = 1;
-	unsigned int	i;
-	char			*expect;
+    int rv = 1;
+    unsigned int i;
+    char *expect;
+    uint8_t rx_byte;
+    uint32_t start_time;
+    char temp_buf[256]; // 临时缓冲区，用于存储从环形缓冲区读取的数据
 
-	if( !atcmd || strlen(atcmd)<=0 )
-	{
-		dbg_print("ERROR: Invalid input arguments\r\n");
-		return -1;
-	}
+    if (!atcmd || strlen(atcmd) <= 0)
+    {
+        dbg_print("ERROR: Invalid input arguments\r\n");
+        return -1;
+    }
 
-	dbg_print("\r\nStart send AT command: %s", atcmd);
-	clear_atcmd_buf();
-	HAL_UART_Transmit(wifi_huart, (uint8_t *)atcmd, strlen(atcmd), 1000);
+    dbg_print("\r\nStart send AT command: %s", atcmd);
+    clear_atcmd_buf();  // 清除环形缓冲区
+    HAL_UART_Transmit(wifi_huart, (uint8_t *)atcmd, strlen(atcmd), 1000);
 
-	expect = expect_reply ? expect_reply : "OK\r\n";
+    expect = expect_reply ? expect_reply : "OK\r\n";
 
-	for(i=0;i<timeout;i++)
-	{
-		if( strstr(g_wifi_rxbuf, expect) )
-		{
-			dbg_print("AT command got expect reply '%s'\r\n", expect);
-			rv = 0;
-			goto CleanUp;
-		}
+    start_time = HAL_GetTick();  // 获取当前时间
 
-		if( strstr(g_wifi_rxbuf, "ERROR\r\n") || strstr(g_wifi_rxbuf, "FAIL\r\n") )
-		{
-			rv = 2;
-			goto CleanUp;
-		}
+    while (1)
+    {
+        // 从环形缓冲区读取数据
+        while (ring_buffer_read(&g_uart2_ringbuf, &rx_byte) == 0)
+        {
+            // 将读取的数据存入临时缓冲区
+            strncat(temp_buf, (char *)&rx_byte, 1);
+        }
 
-		HAL_Delay(1);
-	}
+        // 判断是否包含期望的回复
+        if (strstr(temp_buf, expect))
+        {
+            dbg_print("AT command got expect reply '%s'\r\n", expect);
+            rv = 0;
+            goto CleanUp;
+        }
+
+        // 判断是否出现错误
+        if (strstr(temp_buf, "ERROR\r\n") || strstr(temp_buf, "FAIL\r\n"))
+        {
+            rv = 2;
+            goto CleanUp;
+        }
+
+        // 超时检测
+        if ((HAL_GetTick() - start_time) >= timeout)
+        {
+            break;
+        }
+
+        HAL_Delay(1);
+    }
 
 CleanUp:
-	dbg_print("<<<< AT command reply:\r\n%s", g_wifi_rxbuf);
-	return rv;
+    dbg_print("<<<< AT command reply:\r\n%s", temp_buf);
+    return rv;
 }
 
 
 
-int atcmd_send_data(unsigned char *data, int bytes , unsigned int timeout)
+
+int atcmd_send_data(unsigned char *data, int bytes, unsigned int timeout)
 {
-	int				rv = -1;
-	unsigned int	i;
+    int rv = -1;
+    unsigned int i;
+    uint8_t rx_byte;
+    uint32_t start_time;
+    char temp_buf[256]; // 临时缓冲区，用于存储从环形缓冲区读取的数据
 
-	if( !data || bytes <= 0 )
-	{
-		dbg_print("ERROR: Invalid input arguments\r\n");
-		return -1;
-	}
+    if (!data || bytes <= 0)
+    {
+        dbg_print("ERROR: Invalid input arguments\r\n");
+        return -1;
+    }
 
-	dbg_print("\r\nStart send AT command send [%d] bytes data\n", bytes);
-	clear_atcmd_buf();
-	HAL_UART_Transmit(wifi_huart, data, bytes, 1000);
+    dbg_print("\r\nStart send AT command send [%d] bytes data\n", bytes);
+    clear_atcmd_buf();  // 清除环形缓冲区
+    HAL_UART_Transmit(wifi_huart, data, bytes, 1000);
 
-	for(i=0;i<timeout;i++)
-	{
-		if( strstr(g_wifi_rxbuf, "SEND OK\r\n") )
-		{
-			rv = 0;
-			goto CleanUp;
-		}
+    start_time = HAL_GetTick();  // 获取当前时间
 
-		if( strstr(g_wifi_rxbuf, "ERROR\r\n") )
-		{
-			rv = 1;
-			goto CleanUp;
-		}
+    while (1)
+    {
+        // 从环形缓冲区读取数据
+        while (ring_buffer_read(&g_uart2_ringbuf, &rx_byte) == 0)
+        {
+            // 将读取的数据存入临时缓冲区
+            strncat(temp_buf, (char *)&rx_byte, 1);
+        }
 
-		HAL_Delay(1);
-	}
+        // 判断是否收到成功的回复
+        if (strstr(temp_buf, "SEND OK\r\n"))
+        {
+            rv = 0;
+            goto CleanUp;
+        }
+
+        // 判断是否出现错误
+        if (strstr(temp_buf, "ERROR\r\n"))
+        {
+            rv = 1;
+            goto CleanUp;
+        }
+
+        // 超时检测
+        if ((HAL_GetTick() - start_time) >= timeout)
+        {
+            break;
+        }
+
+        HAL_Delay(1);
+    }
 
 CleanUp:
-	dbg_print("<<<< AT command reply:\r\n%s", g_wifi_rxbuf);
-	return rv;
-
+    dbg_print("<<<< AT command reply:\r\n%s", temp_buf);
+    return rv;
 }
+
 
 
 int esp8266_module_init(void)
@@ -223,33 +264,50 @@ static int util_parser_ipaddr(char *buf, char *key, char *ipaddr, int size)
 
 int esp8266_get_ipaddr(char *ipaddr, char *gateway, int ipaddr_size)
 {
-	if( !ipaddr || !ipaddr || ipaddr_size<7 )
-	{
-		dbg_print("ERROR: Invalid input arguments\r\n");
-		return -1;
-	}
+    if (!ipaddr || !gateway || ipaddr_size < 7)
+    {
+        dbg_print("ERROR: Invalid input arguments\r\n");
+        return -1;
+    }
 
-	if( send_atcmd("AT+CIPSTA_CUR?\r\n", "255.", 1000) )
-	{
-		dbg_print("INFO: ESP8266 AT+CIPSTA_CUR? command failure\r\n");
-		return -2 ;
-	}
+    if (send_atcmd("AT+CIPSTA_CUR?\r\n", "255.", 1000))
+    {
+        dbg_print("INFO: ESP8266 AT+CIPSTA_CUR? command failure\r\n");
+        return -2;
+    }
 
-	if( util_parser_ipaddr(g_wifi_rxbuf, "ip:", ipaddr, ipaddr_size) )
-	{
-		dbg_print("ERROR: ESP8266 AT+CIPSTA_CUR? parser IP failure\r\n");
-		return -3 ;
-	}
+    // 从环形缓冲区读取数据
+    char buffer[UART2_BUFFER_SIZE] = {0};
+    int index = 0;
+    uint8_t byte;
 
-	if( util_parser_ipaddr(g_wifi_rxbuf, "gateway:", gateway, ipaddr_size) )
-	{
-		dbg_print("ERROR: ESP8266 AT+CIPSTA_CUR? parser gateway failure\r\n");
-		return -4 ;
-	}
+    while (uart2_ring_buffer_read(&byte) == 0)
+    {
+        buffer[index++] = byte;
+        if (index >= sizeof(buffer) - 1)
+        {
+            break;
+        }
+    }
+    buffer[index] = '\0';  // 确保缓冲区是以 null 结尾
 
-	dbg_print("INFO: ESP8266 got IP address[%s] gateway[%s] ok\r\n", ipaddr, gateway);
-	return 0;
+    if (util_parser_ipaddr(buffer, "ip:", ipaddr, ipaddr_size))
+    {
+        dbg_print("ERROR: ESP8266 AT+CIPSTA_CUR? parser IP failure\r\n");
+        return -3;
+    }
+
+    if (util_parser_ipaddr(buffer, "gateway:", gateway, ipaddr_size))
+    {
+        dbg_print("ERROR: ESP8266 AT+CIPSTA_CUR? parser gateway failure\r\n");
+        return -4;
+    }
+
+    dbg_print("INFO: ESP8266 got IP address[%s] gateway[%s] ok\r\n", ipaddr, gateway);
+    return 0;
 }
+
+
 
 
 int esp8266_ping_test(char *host)
@@ -368,41 +426,103 @@ int esp8266_sock_send(unsigned char *data, int id, int bytes)
 }
 
 
+int esp8266_sock_recv(unsigned char *buf, int size)
+{
+    char *data = NULL;
+    char *ptr = NULL;
+
+    int len;
+    int rv;
+    int bytes;
+    uint8_t byte;
+    int index = 0;
+
+    if (!buf || size <= 0)
+    {
+        dbg_print("ERROR: Invalid input arguments\r\n");
+        return -1;
+    }
+
+    // 从环形缓冲区读取数据
+    char buffer[UART2_BUFFER_SIZE] = {0};
+    while (uart2_ring_buffer_read(&byte) == 0)
+    {
+        buffer[index++] = byte;
+        if (index >= sizeof(buffer) - 1)
+        {
+            break;
+        }
+    }
+    buffer[index] = '\0';  // 确保缓冲区是以 null 结尾
+
+    if (!(ptr = strstr(buffer, "+IPD,")) || !(data = strchr(buffer, ':')))
+    {
+        return 0;
+    }
+
+    data++;
+    bytes = atoi(ptr + strlen("+IPD,"));
+
+    len = index - (data - buffer);
+
+    if (len < bytes)
+    {
+        dbg_print("+IPD data not receive over, receive again later ...\r\n");
+        return 0;
+    }
+
+    memset(buf, 0, size);
+    rv = bytes > size ? size : bytes;
+    memcpy(buf, data, rv);
+
+    // 清空环形缓冲区
+    ring_buffer_init(&g_uart2_ringbuf);
+
+    return rv;
+}
+
+
+
 int check_client_connection(int *link_id)
 {
     int client_connected = 0;
+    char buffer[UART2_BUFFER_SIZE] = {0};
+    int index = 0;
+    uint8_t byte;
 
-    printf("buf: %s\r\n", g_uart2_rxbuf);
-    if (g_uart2_bytes > 0)
+    // 从环形缓冲区读取数据
+    while (uart2_ring_buffer_read(&byte) == 0)
     {
-        // 使用 strstr 检查是否有新连接的指示消息
-        char *connect_str = strstr(g_uart2_rxbuf, ",CONNECT");
-        if (connect_str != NULL)
+        buffer[index++] = byte;
+        if (index >= sizeof(buffer) - 1)
         {
-            // 获取连接ID
-            char *id_str = strtok(g_uart2_rxbuf, ",");
-            if (id_str != NULL)
-            {
-                *link_id = atoi(id_str);
-                printf("Client connected on link %d\r\n", *link_id);
-                client_connected = 1; // 设置标志位，表示有新连接
-            }
+            break;
         }
-        else
+    }
+    buffer[index] = '\0';  // 确保缓冲区是以 null 结尾
+
+    // 使用 strstr 检查是否有新连接的指示消息
+    char *connect_str = strstr(buffer, ",CONNECT");
+    if (connect_str != NULL)
+    {
+        // 获取连接ID
+        char *id_str = strtok(buffer, ",");
+        if (id_str != NULL)
         {
-            printf("No new connection found\r\n");
+            *link_id = atoi(id_str);
+            printf("Client connected on link %d\r\n", *link_id);
+            client_connected = 1; // 设置标志位，表示有新连接
         }
     }
     else
     {
-        printf("No data in buffer\r\n");
+        printf("No new connection found\r\n");
     }
 
-    // 如果检测到新连接，则清空缓冲区
+    // 如果检测到新连接，则清空环形缓冲区
     if (client_connected)
     {
-        g_uart2_bytes = 0; // 重置缓冲区计数器
-        memset(g_uart2_rxbuf, 0, sizeof(g_uart2_rxbuf)); // 清空缓冲区内容
+        ring_buffer_init(&g_uart2_ringbuf); // 重新初始化环形缓冲区
     }
 
     return client_connected; // 返回连接状态
