@@ -254,14 +254,6 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 		HAL_UART_Receive_IT(&huart1,&s_uart1_rxch,1);
 	}
 
-//	if(huart->Instance == USART2)
-//	{
-//		if(g_uart2_bytes < sizeof(g_uart2_rxbuf))
-//		{
-//			g_uart2_rxbuf[g_uart2_bytes++] = s_uart2_rxch;
-//		}
-//		HAL_UART_Receive_IT(&huart2,&s_uart2_rxch,1);
-//	}
 	if (huart->Instance == USART2)
 	{
 		ring_buffer_write(&g_uart2_ringbuf, s_uart2_rxch);  // 将数据写入环形缓冲区

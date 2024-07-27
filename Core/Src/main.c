@@ -58,7 +58,7 @@
 
 #define	PORT			12345
 #define JSON_BUF_SIZE 	1028
-int 					client_link_id = -1;
+int 					client_id = -1;
 
 /* USER CODE END PV */
 
@@ -157,54 +157,53 @@ int main(void)
 	  }
 
 
-      if (wifi_status & FLAG_SOCK_CONNECTED && client_link_id < 0)
+      if (wifi_status & FLAG_SOCK_CONNECTED && client_id < 0)
       {
-          int connection_status = check_client_connection(&client_link_id);
+          int connection_status = check_client_connection(&client_id);
           if (connection_status > 0)
           {
               wifi_status |= FLAG_CLIENT_CONNECTED;
-              printf("Client connected successfully on link %d\r\n", client_link_id);
+              printf("Client connected successfully on link %d\r\n", client_id);
           }
           else if (connection_status < 0)
           {
-              printf("Client connection on link [%d] closed\r\n", client_link_id);
-              client_link_id = -1;
+              printf("Client connection on link [%d] closed\r\n", client_id);
+              client_id = -1;
           }
       }
 
-      printf("client_link_id: %d\r\n");
 
-	  if (wifi_status & FLAG_CLIENT_CONNECTED)
+	  if ( client_id >= 0 )
 	  {
 		  if (!session->handshaked)
-		{
-			do_wss_handshake(&client_link_id, session);
-		}
-		else
-		{
-			uint32_t current_time = HAL_GetTick();
-			if (current_time - last_send_time >= send_interval)
-			{
-				if (report_tempRH_json() == 0)
-				{
-					printf("Temperature and humidity data sent successfully\r\n");
-				}
-				else
-				{
-					printf("Failed to send temperature and humidity data\r\n");
-				}
-				last_send_time = current_time;
-			}
+		  {
+			  printf("satrt handshake\r\n");
+			  do_wss_handshake(&client_id, session);
+		  }
+		  else
+		  {
+			  uint32_t current_time = HAL_GetTick();
+			  if (current_time - last_send_time >= send_interval)
+			  {
+				  if (report_tempRH_json() == 0)
+				  {
+					  printf("Temperature and humidity data sent successfully\r\n");
+				  }
+				  else
+				  {
+					  printf("Failed to send temperature and humidity data\r\n");
+				  }
+				  last_send_time = current_time;
+			  }
 
-			if (g_uart2_ringbuf.count > 0)
-			{
-				if (parser_led_json(&g_uart2_ringbuf) != 0)
-				{
-					// 根据需要清空缓冲区
-					ring_buffer_init(&g_uart2_ringbuf);
-				}
-			}
-		}
+			  if (g_uart2_ringbuf.count > 0)
+			  {
+				  if (parser_led_json(&g_uart2_ringbuf) != 0)
+				  {
+					  ring_buffer_init(&g_uart2_ringbuf);
+				  }
+			  }
+		  }
 	  }
 
 	  HAL_Delay(300);
@@ -279,7 +278,7 @@ int report_tempRH_json(void)
     memset(buf, 0, sizeof(buf));
     snprintf(buf, sizeof(buf), "{\"Temperature\":\"%.2f\",\"Humidity\":\"%.2f\"}", temperature, humidity);
 
-    rv = esp8266_sock_send((unsigned char *)buf, client_link_id, strlen(buf));
+    rv = esp8266_sock_send((unsigned char *)buf, client_id, strlen(buf));
 
     return rv;
 }
