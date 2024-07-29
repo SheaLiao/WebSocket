@@ -15,9 +15,11 @@ LDFLAGS+=-L ./openlibs/libevent/install/lib/
 CC=gcc
 
 all:
+	make -C src
 	${CC} ${CFLAGS} -g websocket.c -o ${APPNAME} ${LDFLAGS} -lmywslib -levent -lcjson -lgpiod -pthread
 
 clean:
+	make clean -C src
 	rm -f ${APPNAME}
 
 run:
