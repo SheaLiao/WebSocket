@@ -74,11 +74,11 @@ void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 2 */
 
-gpio_t leds[LedMax]=
+gpio_t leds[LED_MAX]=
 {
-		{"RedLed",RedLed_GPIO_Port,RedLed_Pin},
-		{"GreenLed",GreenLed_GPIO_Port,GreenLed_Pin},
-		{"BlueLed",BlueLed_GPIO_Port,BlueLed_Pin},
+		{"LED_R",RedLed_GPIO_Port,RedLed_Pin},
+		{"LED_G",GreenLed_GPIO_Port,GreenLed_Pin},
+		{"LED_B",BlueLed_GPIO_Port,BlueLed_Pin},
 };
 
 
@@ -86,7 +86,7 @@ void turn_led(int which,int status)
 {
 	GPIO_PinState level;
 
-	if(which>=LedMax)
+	if(which>=LED_MAX)
 		return;
 
 	level = (OFF==status) ? GPIO_PIN_SET : GPIO_PIN_RESET;
@@ -96,7 +96,7 @@ void turn_led(int which,int status)
 
 void blink_led(int which,uint32_t interval)
 {
-	if(which>=LedMax || interval<=0)
+	if(which>=LED_MAX || interval<=0)
 		return;
 
 	turn_led(which,ON);
@@ -107,5 +107,7 @@ void blink_led(int which,uint32_t interval)
 
 	return;
 }
+
+
 
 /* USER CODE END 2 */

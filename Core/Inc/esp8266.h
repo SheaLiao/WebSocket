@@ -54,5 +54,7 @@ extern int esp8266_sock_recv(unsigned char *buf, int size);
 
 extern int check_client_connection(int *link_id);
 
+extern void extract_after_ipd(const char *buffer, char *output);
+
 
 #endif /* INC_ESP8266_H_ */

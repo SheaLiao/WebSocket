@@ -18,6 +18,7 @@
 #include "esp8266.h"
 #include "index_html.h"
 #include "usart.h"
+#include "gpio.h"
 
 #define CONFIG_DEBUG
 #ifdef CONFIG_DEBUG
@@ -35,50 +36,32 @@ static inline void header_set_version(wss_header_t *header, char *v);
 static size_t base64_encode_sha1(char *key, size_t key_length, char **accept_key);
 
 
-static void extract_after_ipd(const char *buffer, char *output)
-{
-    const char *start = strstr(buffer, "+IPD,");
-    if (start)
-    {
-        start += strlen("+IPD,");
-
-        const char *colon = strchr(start, ':');
-        if (colon)
-        {
-            start = colon + 1;
-            strcpy(output, start);
-        }
-        else
-        {
-            output[0] = '\0';
-        }
-    }
-    else
-    {
-        output[0] = '\0';
-    }
-}
 
 
 void do_wss_handshake(int *sockfd, wss_session_t *session)
 {
-    int                         bytes;
     enum HttpStatus_Code        code;
     wss_header_t               *header = &session->header;
     uint8_t 					buffer[UART2_BUFFER_SIZE];
     uint8_t 					buf[UART2_BUFFER_SIZE];
+    int							bytes = 0;
 
-	printf("buffer:%s\r\n", buffer);
+    //esp8266_sock_recv(buffer, bytes);
+
+    bytes = uart2_ring_buffer_read(buffer);
+    buffer[bytes] = '\0';
+    dbg_print("receive data from client:%s\r\n", buffer);
+
 
 	extract_after_ipd(buffer, buf);
 
 	header->content = (char *)buf;
 	header->length = strlen(buf);
 
-	dbg_print("Parser [%d] bytes data from client %s:\n%s\n", sizeof(buf), session->client, buf);
+//	dbg_print("Parser [%d] bytes data from client %s:\n%s\r\n", sizeof(buf), session->client, buf);
 
     code = wss_parser_header(header);
-    dbg_print("Client header parsed HTTP status code: [%d]\n", code);
+//    dbg_print("Client header parsed HTTP status code: [%d]\r\n", code);
 
     if (REQ_HTTP == header->type)
     {
@@ -400,6 +383,8 @@ void http_response(int *sockfd, enum HttpStatus_Code code)
 
         /* send response Web page */
         esp8266_sock_send((unsigned char *)g_index_html, *sockfd, strlen(g_index_html));
+
+        turn_led(LED_R, OFF);
     }
 
     return;

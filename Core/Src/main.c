@@ -157,7 +157,7 @@ int main(void)
 	  }
 
 
-      if (wifi_status & FLAG_SOCK_CONNECTED && client_id < 0)
+      if (wifi_status & FLAG_SOCK_CONNECTED)
       {
           int connection_status = check_client_connection(&client_id);
           if (connection_status > 0)
@@ -177,7 +177,7 @@ int main(void)
 	  {
 		  if (!session->handshaked)
 		  {
-			  printf("satrt handshake\r\n");
+			  printf("start handshake\r\n");
 			  do_wss_handshake(&client_id, session);
 		  }
 		  else
@@ -212,6 +212,7 @@ int main(void)
     /* USER CODE BEGIN 3 */
   }
 
+  free(session);
 
   /* USER CODE END 3 */
 }
@@ -331,7 +332,7 @@ int parser_led_json(RingBuffer *rb)
         return -1;
     }
 
-    for (int i = 0; i < LedMax; i++)
+    for (int i = 0; i < LED_MAX; i++)
     {
         char *value;
         size_t valen;

@@ -10,7 +10,7 @@
 
 #include <stdint.h>
 
-#define UART2_BUFFER_SIZE 4096
+#define UART2_BUFFER_SIZE 1024
 
 typedef struct {
     uint8_t buffer[UART2_BUFFER_SIZE];

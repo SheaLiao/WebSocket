@@ -21,14 +21,13 @@
 #include "usart.h"
 
 /* USER CODE BEGIN 0 */
+#include "gpio.h"
 
 static uint8_t s_uart1_rxch;
 char g_uart1_rxbuf[256];
 uint8_t g_uart1_bytes;
 
 
-//char g_uart2_rxbuf[4096];
-//uint8_t g_uart2_bytes;
 RingBuffer g_uart2_ringbuf;
 static uint8_t s_uart2_rxch;
 
@@ -256,14 +255,15 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 
 	if (huart->Instance == USART2)
 	{
-		ring_buffer_write(&g_uart2_ringbuf, s_uart2_rxch);  // 将数据写入环形缓冲区
 		HAL_UART_Receive_IT(&huart2, &s_uart2_rxch, 1);  // 重新启动接收中断
+		ring_buffer_write(&g_uart2_ringbuf, s_uart2_rxch);  // 将数据写入环形缓冲区
+		turn_led(LED_R, ON);
 	}
 }
 
 int uart2_ring_buffer_read(uint8_t *data)
 {
-    return ring_buffer_read(&g_uart2_ringbuf, data);  // 从环形缓冲区中读取数据
+    return ring_buffer_read(&g_uart2_ringbuf, data);  // 从环形缓冲区中读取数�?
 }
 
 

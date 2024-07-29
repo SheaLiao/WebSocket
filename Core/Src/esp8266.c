@@ -422,7 +422,6 @@ int esp8266_sock_recv(unsigned char *buf, int size)
 {
     char *data = NULL;
     char *ptr = NULL;
-
     int len;
     int rv;
     int bytes;
@@ -445,13 +444,14 @@ int esp8266_sock_recv(unsigned char *buf, int size)
         }
     }
     buffer[index] = '\0';
+    //dbg_print("receive data from client:%s\r\n", buffer);
 
-    if (!(ptr = strstr(buffer, "+IPD,")) || !(data = strchr(buffer, ':')))
+    if (!(ptr = strstr(buffer, "+IPD,")) || !(data = strchr(ptr, ':')))
     {
-        return 0;
+        return 0; // 数据还没有到齐
     }
 
-    data++;
+    data++; // 跳过冒号
     bytes = atoi(ptr + strlen("+IPD,"));
 
     len = index - (data - buffer);
@@ -466,11 +466,12 @@ int esp8266_sock_recv(unsigned char *buf, int size)
     rv = bytes > size ? size : bytes;
     memcpy(buf, data, rv);
 
-    // 清空环形缓冲区
+
     ring_buffer_init(&g_uart2_ringbuf);
 
     return rv;
 }
+
 
 
 
@@ -517,7 +518,29 @@ int check_client_connection(int *client_id)
 }
 
 
+void extract_after_ipd(const char *buffer, char *output)
+{
+    const char *start = strstr(buffer, "+IPD,");
+    if (start)
+    {
+        start += strlen("+IPD,");
 
+        const char *colon = strchr(start, ':');
+        if (colon)
+        {
+            start = colon + 1;
+            strcpy(output, start);
+        }
+        else
+        {
+            output[0] = '\0';
+        }
+    }
+    else
+    {
+        output[0] = '\0';
+    }
+}
 
 
 
