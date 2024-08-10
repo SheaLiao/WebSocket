@@ -25,6 +25,7 @@ static_lib:
 	${AR} -rcs lib${LIBNAME}.a *.o
 
 install:
+	cd `pwd`/../ && mkdir lib
 	cp -rf lib${LIBNAME}.* ${INSTPATH}
 
 uninstall:

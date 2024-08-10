@@ -85,19 +85,6 @@ websocket解析相关的源码 https://github.com/mortzdk/websocket
 
 ## 下载使用
 
-下载安装开源库
-
-```sh
-cd Websocket/openlibs/cJSON
-make
-cd Websocket/openlibs/libevent
-make
-```
-
-注：本项目还使用到了libgpiod，需要自行下载安装
-
-
-
 如果修改了tools下的index.html
 
 ```sh
@@ -111,9 +98,11 @@ mv index.c ../src
 
 ```sh
 cd Websocket
-make  #编译
+make  #到openlibs文件夹下下载安装开源库，编译生成库
 make run  #运行
 ```
+
+注：本项目还使用到了libgpiod，需要自行下载安装
 
 
 
