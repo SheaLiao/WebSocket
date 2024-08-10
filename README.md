@@ -75,7 +75,15 @@ websocket解析相关的源码 https://github.com/mortzdk/websocket
 
 
 
-## 使用
+## 实现流程
+
+![流程图](images/流程图.jpg)
+
+
+
+
+
+## 下载使用
 
 下载安装开源库
 
@@ -99,21 +107,33 @@ mv index.c ../src
 
 
 
-编译
+编译运行
 
 ```sh
-cd Websocket/src
-make
+cd Websocket
+make  #编译
+make run  #运行
 ```
 
 
 
-运行
+## 运行
 
-```sh
-make
-make run
-```
+客户端：
+
+![客户端页面](images/客户端页面.png)
+
+
+
+服务器：
+
+![服务器运行截图](images/服务器运行截图.png)
+
+
+
+树莓派：
+
+![](images/树莓派.jpg)
 
 
 
