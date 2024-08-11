@@ -3,11 +3,13 @@ INSTPATH=`pwd`/../lib/
 INCPATH=`pwd`/../include/ 
 EVPATH=`pwd`/../openlibs/libevent/install/include
 JSONPATH=`pwd`/../openlibs/cJSON/install/include/
+GPIOPATH=`pwd`/../openlibs/libgpiod/install/include/
 
 
 CFLAGS+=-I${INCPATH}
 CFLAGS+=-I${EVPATH}
 CFLAGS+=-I${JSONPATH}
+CFLAGS+=-I${GPIOPATH}
 
 CC=gcc
 AR=ar 
