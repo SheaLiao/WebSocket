@@ -1,14 +1,14 @@
-/*********************************************************************************
- *      Copyright:  (C) 2022 GuoWenxue <guowenxue@gmail.com>
+/********************************************************************************
+ *      Copyright:  (C) 2024 Liao Shengli<li@gmail.com>
  *                  All rights reserved.
  *
  *       Filename:  wss.h
- *    Description:  This file is a websocket Protocol API.
+ *    Description:  This file 
  *
- *        Version:  1.0.0(10/09/22)
- *         Author:  Guo Wenxue <guowenxue@gmail.com>
- *      ChangeLog:  1, Release initial version on "10/09/22 15:11:36"
- *
+ *        Version:  1.0.0(11/07/24)
+ *         Author:  Liao Shengli <li@gmail.com>
+ *      ChangeLog:  1, Release initial version on "11/07/24 20:49:13"
+ *                 
  ********************************************************************************/
 
 #ifndef  _WSS_H_

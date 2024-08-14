@@ -1,12 +1,12 @@
 /*********************************************************************************
- *      Copyright:  (C) 2023 LingYun IoT System Studio.
+ *      Copyright:  (C) Liao Shengli <li@gmail.com>
  *                  All rights reserved.
  *
  *       Filename:  logger.c
  *    Description:  This file is common logger API functions
  *
  *        Version:  1.0.0(11/08/23)
- *         Author:  Guo Wenxue <guowenxue@gmail.com>
+ *         Author:  Liao Shengli <li@gmail.com>
  *      ChangeLog:  1, Release initial version on "11/08/23 16:18:43"
  *
  ********************************************************************************/
